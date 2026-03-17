@@ -1,5 +1,21 @@
 const supabase = require("../services/supabase");
 
+const containsForbiddenTags = (msg) => {
+  if (!msg) return false;
+  const forbiddenTags = [
+    /<\/?html\b[^>]*>/i, 
+    /<\/?body\b[^>]*>/i, 
+    /<\/?head\b[^>]*>/i, 
+    /<\/?script\b[^>]*>/i, 
+    /<\/?iframe\b[^>]*>/i, 
+    /<\/?style\b[^>]*>/i,
+    /<\/?meta\b[^>]*>/i,
+    /<\/?title\b[^>]*>/i,
+    /<\/?link\b[^>]*>/i
+  ];
+  return forbiddenTags.some(tag => tag.test(msg));
+};
+
 const getActiveMessages = async (req, res) => {
   try {
     const now = new Date().toISOString();
@@ -47,6 +63,10 @@ const createMessage = async (req, res) => {
     const { type, msg, one_time, start_time, end_time, is_active, priority } =
       req.body;
 
+    if (containsForbiddenTags(msg)) {
+      return res.status(400).json({ success: false, message: "Security Error: High-level HTML tags (html, body, script, iframe, etc.) are not allowed." });
+    }
+
     const { data, error } = await supabase
       .from("messages")
       .insert([
@@ -77,6 +97,10 @@ const updateMessage = async (req, res) => {
   try {
     const { id } = req.params;
     const updates = req.body;
+
+    if (updates.msg && containsForbiddenTags(updates.msg)) {
+      return res.status(400).json({ success: false, message: "Security Error: High-level HTML tags (html, body, script, iframe, etc.) are not allowed." });
+    }
 
     const { data, error } = await supabase
       .from("messages")
