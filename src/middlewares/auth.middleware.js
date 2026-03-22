@@ -6,7 +6,7 @@ const verifyToken = (req, res, next) => {
   if (!token) {
     return res
       .status(401)
-      .json({ error: "Unauthorized: Access denied. Please login first." });
+      .json({ error: "Abe chutiye 😑, bakchodi karne ki aadat nahi gai teri" });
   }
 
   const JWT_SECRET = process.env.JWT_SECRET;
@@ -16,7 +16,9 @@ const verifyToken = (req, res, next) => {
     req.user = decoded; // add decoded payload to request
     next();
   } catch (error) {
-    return res.status(401).json({ error: "Unauthorized: Invalid or expired token" });
+    return res
+      .status(401)
+      .json({ error: "Abe chutiye 😑, bakchodi karne ki aadat nahi gai teri" });
   }
 };
 
