@@ -10,7 +10,7 @@ const app = express();
 // Middleware
 app.use(
   cors({
-    origin: ["http://localhost:3000", "https://scalerbackend-frontend.vercel.app"], // Add your production frontend URL here
+    origin: ["http://localhost:3000", "https://scalerfrontend.vercel.app"], // Add your production frontend URL here
     credentials: true,
   }),
 );
