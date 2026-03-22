@@ -1,22 +1,25 @@
-const verifyApiKey = (req, res, next) => {
-  const authHeader = req.headers["authorization"];
+const jwt = require("jsonwebtoken");
 
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+const verifyToken = (req, res, next) => {
+  const token = req.cookies.adminToken;
+
+  if (!token) {
     return res
       .status(401)
-      .json({ error: "Unauthorized: Missing or invalid authorization header" });
+      .json({ error: "Unauthorized: Access denied. Please login first." });
   }
 
-  const token = authHeader.split(" ")[1];
-  const expectedKey = process.env.EXTENSION_API_KEY;
+  const JWT_SECRET = process.env.JWT_SECRET;
 
-  if (token !== expectedKey) {
-    return res.status(403).json({ error: "Forbidden: Invalid API Key" });
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded; // add decoded payload to request
+    next();
+  } catch (error) {
+    return res.status(401).json({ error: "Unauthorized: Invalid or expired token" });
   }
-
-  next();
 };
 
 module.exports = {
-  verifyApiKey,
+  verifyToken,
 };

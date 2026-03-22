@@ -3,25 +3,27 @@ const supabase = require("../services/supabase");
 const containsForbiddenTags = (msg) => {
   if (!msg) return false;
   const forbiddenTags = [
-    /<\/?html\b[^>]*>/i, 
-    /<\/?body\b[^>]*>/i, 
-    /<\/?head\b[^>]*>/i, 
-    /<\/?script\b[^>]*>/i, 
-    /<\/?iframe\b[^>]*>/i, 
+    /<\/?html\b[^>]*>/i,
+    /<\/?body\b[^>]*>/i,
+    /<\/?head\b[^>]*>/i,
+    /<\/?iframe\b[^>]*>/i,
     /<\/?style\b[^>]*>/i,
     /<\/?meta\b[^>]*>/i,
     /<\/?title\b[^>]*>/i,
-    /<\/?link\b[^>]*>/i
+    /<\/?link\b[^>]*>/i,
   ];
-  return forbiddenTags.some(tag => tag.test(msg));
+  return forbiddenTags.some((tag) => tag.test(msg));
 };
+
+const table_name =
+  process.env.NODE_ENV === "production" ? "messages" : "test_messages";
 
 const getActiveMessages = async (req, res) => {
   try {
     const now = new Date().toISOString();
 
     const { data, error } = await supabase
-      .from("messages")
+      .from(table_name)
       .select("*")
       .eq("is_active", true)
       .or(`start_time.is.null,start_time.lte.${now}`)
@@ -43,7 +45,7 @@ const getActiveMessages = async (req, res) => {
 const getAllMessages = async (req, res) => {
   try {
     const { data, error } = await supabase
-      .from("messages")
+      .from(table_name)
       .select("*")
       .order("created_at", { ascending: false });
 
@@ -64,11 +66,15 @@ const createMessage = async (req, res) => {
       req.body;
 
     if (containsForbiddenTags(msg)) {
-      return res.status(400).json({ success: false, message: "Security Error: High-level HTML tags (html, body, script, iframe, etc.) are not allowed." });
+      return res.status(400).json({
+        success: false,
+        message:
+          "Security Error: High-level HTML tags (html, body, script, iframe, etc.) are not allowed.",
+      });
     }
 
     const { data, error } = await supabase
-      .from("messages")
+      .from(table_name)
       .insert([
         {
           type,
@@ -99,11 +105,15 @@ const updateMessage = async (req, res) => {
     const updates = req.body;
 
     if (updates.msg && containsForbiddenTags(updates.msg)) {
-      return res.status(400).json({ success: false, message: "Security Error: High-level HTML tags (html, body, script, iframe, etc.) are not allowed." });
+      return res.status(400).json({
+        success: false,
+        message:
+          "Security Error: High-level HTML tags (html, body, script, iframe, etc.) are not allowed.",
+      });
     }
 
     const { data, error } = await supabase
-      .from("messages")
+      .from(table_name)
       .update(updates)
       .eq("id", id)
       .select();
@@ -129,7 +139,7 @@ const deleteMessage = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const { error } = await supabase.from("messages").delete().eq("id", id);
+    const { error } = await supabase.from(table_name).delete().eq("id", id);
 
     if (error) throw error;
 
@@ -144,10 +154,56 @@ const deleteMessage = async (req, res) => {
   }
 };
 
+/**
+ * Synchronizes user profile information from the extension to Supabase.
+ * Uses 'upsert' to prevent duplicate entries for the same user email.
+ */
+const syncUser = async (req, res) => {
+  try {
+    const { scaler_id, name, gender, email, orgyear, cohort } = req.body;
+
+    if (!email) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Email is required" });
+    }
+
+    const { data, error } = await supabase
+      .from("extension_users")
+      .upsert(
+        {
+          scaler_id,
+          name,
+          gender,
+          email,
+          orgyear,
+          cohort,
+          last_sync: new Date().toISOString(),
+        },
+        { onConflict: "email" },
+      )
+      .select();
+
+    if (error) throw error;
+
+    return res.status(200).json({
+      success: true,
+      message: "User synced successfully",
+      data: data[0],
+    });
+  } catch (error) {
+    console.error("Error syncing user:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Internal Server Error" });
+  }
+};
+
 module.exports = {
   getActiveMessages,
   getAllMessages,
   createMessage,
   updateMessage,
   deleteMessage,
+  syncUser,
 };

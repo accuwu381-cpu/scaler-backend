@@ -1,6 +1,5 @@
 const express = require("express");
 const multer = require("multer");
-const { verifyApiKey } = require("../middlewares/auth.middleware");
 const transcribeController = require("../controllers/transcribe.controller");
 
 const router = express.Router();
@@ -13,11 +12,6 @@ const upload = multer({
   },
 });
 
-router.post(
-  "/",
-  verifyApiKey,
-  upload.single("file"),
-  transcribeController.transcribeAudio,
-);
+router.post("/", upload.single("file"), transcribeController.transcribeAudio);
 
 module.exports = router;
