@@ -172,6 +172,7 @@ const syncUser = async (req, res) => {
       role,
       country,
       cgr_score,
+      avatar_file_name,
     } = req.body;
 
     if (!email) {
@@ -195,6 +196,7 @@ const syncUser = async (req, res) => {
           role,
           country,
           cgr_score,
+          avatar_file_name,
           last_sync: new Date().toISOString(),
         },
         { onConflict: "email" },
