@@ -4,6 +4,7 @@ const cookieParser = require("cookie-parser");
 const transcribeRoutes = require("./routes/transcribe.routes");
 const authRoutes = require("./routes/auth.routes");
 const messagesRoutes = require("./routes/messages.routes");
+const usersRoutes = require("./routes/users.routes");
 
 const app = express();
 
@@ -20,6 +21,7 @@ app.use(cookieParser());
 // Routes
 app.use("/api/transcribe", transcribeRoutes);
 app.use("/api/messages", messagesRoutes);
+app.use("/api/users", usersRoutes);
 app.use("/api/auth", authRoutes);
 
 // Health check

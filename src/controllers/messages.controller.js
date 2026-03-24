@@ -160,7 +160,19 @@ const deleteMessage = async (req, res) => {
  */
 const syncUser = async (req, res) => {
   try {
-    const { scaler_id, name, gender, email, orgyear, cohort } = req.body;
+    const {
+      scaler_id,
+      name,
+      gender,
+      email,
+      orgyear,
+      cohort,
+      linkedin_profile,
+      slug,
+      role,
+      country,
+      cgr_score,
+    } = req.body;
 
     if (!email) {
       return res
@@ -178,6 +190,11 @@ const syncUser = async (req, res) => {
           email,
           orgyear,
           cohort,
+          linkedin_profile,
+          slug,
+          role,
+          country,
+          cgr_score,
           last_sync: new Date().toISOString(),
         },
         { onConflict: "email" },
