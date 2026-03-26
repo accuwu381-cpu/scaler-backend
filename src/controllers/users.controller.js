@@ -87,4 +87,43 @@ const pingUser = async (req, res) => {
   }
 };
 
-module.exports = { getAllUsers, pingUser };
+/**
+ * POST /api/users/download
+ * Increments the download counter (video | audio | transcript) for a user.
+ * Public endpoint — called by the extension.
+ */
+const trackDownload = async (req, res) => {
+  try {
+    const { email, type } = req.body;
+
+    const allowed = ["video", "audio", "transcript"];
+    if (!email) return res.status(400).json({ success: false, message: "Email is required" });
+    if (!allowed.includes(type)) return res.status(400).json({ success: false, message: "Invalid type. Must be video, audio, or transcript." });
+
+    // Fetch current count first, then increment
+    const { data: user, error: fetchError } = await supabase
+      .from("extension_users")
+      .select(`${type}`)
+      .eq("email", email)
+      .single();
+
+    if (fetchError || !user) return res.status(404).json({ success: false, message: "User not found" });
+
+    const newCount = (user[type] ?? 0) + 1;
+
+    const { error: updateError } = await supabase
+      .from("extension_users")
+      .update({ [type]: newCount })
+      .eq("email", email);
+
+    if (updateError) throw updateError;
+
+    return res.status(200).json({ success: true, type, count: newCount });
+  } catch (error) {
+    console.error("Error tracking download:", error);
+    return res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+};
+
+module.exports = { getAllUsers, pingUser, trackDownload };
+

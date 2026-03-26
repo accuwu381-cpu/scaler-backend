@@ -10,7 +10,7 @@ const loginAdmin = (req, res) => {
 
   if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
     // Generate a JWT token valid for 10 minutes
-    const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: "10m" });
+    const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: "30m" });
 
     // Set JWT as a secure cookie
     res.cookie("adminToken", token, {
@@ -20,7 +20,9 @@ const loginAdmin = (req, res) => {
       maxAge: 10 * 60 * 1000, // 10 minutes
     });
 
-    return res.status(200).json({ success: true, message: "Logged in successfully" });
+    return res
+      .status(200)
+      .json({ success: true, message: "Logged in successfully" });
   }
 
   return res
@@ -34,7 +36,9 @@ const logoutAdmin = (req, res) => {
     secure: process.env.NODE_ENV === "production",
     sameSite: process.env.NODE_ENV === "production" ? "none" : "Lax",
   });
-  return res.status(200).json({ success: true, message: "Logged out successfully" });
+  return res
+    .status(200)
+    .json({ success: true, message: "Logged out successfully" });
 };
 
 module.exports = { loginAdmin, logoutAdmin };
