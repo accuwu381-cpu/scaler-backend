@@ -61,4 +61,30 @@ const getAllUsers = async (req, res) => {
   }
 };
 
-module.exports = { getAllUsers };
+/**
+ * POST /api/users/ping
+ * Updates the last_seen timestamp for a user.
+ * Public endpoint used by the extension.
+ */
+const pingUser = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ success: false, message: "Email is required" });
+
+    const { data, error } = await supabase
+      .from("extension_users")
+      .update({ last_seen: new Date().toISOString() })
+      .eq("email", email)
+      .select();
+
+    if (error) throw error;
+    if (!data.length) return res.status(404).json({ success: false, message: "User not found" });
+
+    return res.status(200).json({ success: true, message: "Last seen updated" });
+  } catch (error) {
+    console.error("Error pinging user:", error);
+    return res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+};
+
+module.exports = { getAllUsers, pingUser };

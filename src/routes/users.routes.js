@@ -3,10 +3,13 @@ const { verifyToken } = require("../middlewares/auth.middleware");
 const { getAllUsers } = require("../controllers/users.controller");
 
 const router = express.Router();
+const { getAllUsers, pingUser } = require("../controllers/users.controller");
 
-// All user routes require admin JWT auth
+// Public routes
+router.post("/ping", pingUser);
+
+// Protected admin routes
 router.use(verifyToken);
-
 router.get("/", getAllUsers);
 
 module.exports = router;
