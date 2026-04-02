@@ -3,19 +3,16 @@ const fetch = (...args) =>
   import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
 class TranscribeService {
-  async transcribeAudio(fileBuffer, originalName, mimetype) {
+  async transcribeUrl(audioUrl) {
     if (!process.env.LEMONFOX_API_KEY) {
       throw new Error("Lemonfox API key is not configured.");
     }
 
     const formData = new FormData();
-    formData.append("file", fileBuffer, {
-      filename: originalName || "audio.aac",
-      contentType: mimetype || "audio/aac",
-    });
+    formData.append("file", audioUrl);
     formData.append("model", "whisper-1");
 
-    console.log(`Sending file ${originalName} to Lemonfox API...`);
+    console.log(`Sending url to Lemonfox API...`);
 
     const response = await fetch(
       "https://api.lemonfox.ai/v1/audio/transcriptions",
@@ -26,6 +23,7 @@ class TranscribeService {
           ...formData.getHeaders(),
         },
         body: formData,
+        // Optional: you can increase timeouts if the file is large
       },
     );
 
