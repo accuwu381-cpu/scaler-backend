@@ -94,11 +94,23 @@ const pingUser = async (req, res) => {
  */
 const trackDownload = async (req, res) => {
   try {
-    const { email, type } = req.body;
+    const { email, type, lecture } = req.body;
 
     const allowed = ["video", "audio", "transcript"];
     if (!email) return res.status(400).json({ success: false, message: "Email is required" });
     if (!allowed.includes(type)) return res.status(400).json({ success: false, message: "Invalid type. Must be video, audio, or transcript." });
+
+    // Insert into separate tracking table
+    if (lecture) {
+      const { error: insertError } = await supabase
+        .from("download_history")
+        .insert([{ email, type, lecture }]);
+      
+      if (insertError) {
+        console.error("Error inserting into download_history:", insertError);
+        // non-blocking for the counter
+      }
+    }
 
     // Fetch current count first, then increment
     const { data: user, error: fetchError } = await supabase

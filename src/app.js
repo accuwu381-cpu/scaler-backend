@@ -10,7 +10,7 @@ const { connectMongo } = require("./services/mongodb");
 
 // Connect to MongoDB immediately (cached — safe to call multiple times)
 connectMongo().catch((err) =>
-  console.error("MongoDB initial connect failed:", err.message)
+  console.error("MongoDB initial connect failed:", err.message),
 );
 
 const app = express();
@@ -21,6 +21,7 @@ app.use(
     origin: ["http://localhost:3000", "https://scalerfrontend.vercel.app"], // Add your production frontend URL here
     credentials: true,
   }),
+  // cors()
 );
 app.use(express.json());
 app.use(cookieParser());
