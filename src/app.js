@@ -18,11 +18,16 @@ const app = express();
 // Middleware
 app.use(
   cors({
-    origin: ["http://localhost:3000", "https://scalerfrontend.vercel.app"], // Add your production frontend URL here
+    origin: [
+      ...(process.env.NODE_ENV === "development"
+        ? ["http://localhost:3000"]
+        : []),
+      "https://scalerfrontend.vercel.app",
+    ],
     credentials: true,
   }),
-  // cors()
 );
+
 app.use(express.json());
 app.use(cookieParser());
 
