@@ -4,17 +4,18 @@ const {
 } = require("../services/transcriptCache.service");
 
 /**
- * GET /api/transcript?title=<lecture title>
+ * GET /api/transcript?slug=<lecture slug>
+ * Also supports legacy: ?title=<lecture title>
  * Returns { text } if cached, or 404 if not found.
  */
 const getTranscript = async (req, res) => {
   try {
-    const { title } = req.query;
-    if (!title || !title.trim()) {
-      return res.status(400).json({ error: "Query param 'title' is required." });
+    const slug = req.query.slug || req.query.title;
+    if (!slug || !slug.trim()) {
+      return res.status(400).json({ error: "Query param 'slug' (or 'title') is required." });
     }
 
-    const cached = await getCachedTranscript(title.trim());
+    const cached = await getCachedTranscript(slug.trim());
     if (!cached) {
       return res.status(404).json({ cached: false });
     }
@@ -28,21 +29,23 @@ const getTranscript = async (req, res) => {
 
 /**
  * POST /api/transcript/save
- * Body: { title: string, text: string }
+ * Body: { slug: string, title: string, text: string }
  * Saves transcript to MongoDB + indexes in Supabase.
+ * `slug` is the unique lecture identifier; `title` is the human-readable name.
  */
 const saveTranscriptHandler = async (req, res) => {
   try {
-    const { title, text } = req.body;
+    const { slug, title, text } = req.body;
+    const lectureSlug = slug || title; // backward compat: old clients send title only
 
-    if (!title || !title.trim()) {
-      return res.status(400).json({ error: "'title' is required." });
+    if (!lectureSlug || !lectureSlug.trim()) {
+      return res.status(400).json({ error: "'slug' (or 'title') is required." });
     }
     if (!text || !text.trim()) {
       return res.status(400).json({ error: "'text' is required." });
     }
 
-    await saveTranscript(title.trim(), text.trim());
+    await saveTranscript(lectureSlug.trim(), title?.trim() || lectureSlug.trim(), text.trim());
     return res.status(200).json({ success: true });
   } catch (err) {
     console.error("saveTranscript error:", err.message);

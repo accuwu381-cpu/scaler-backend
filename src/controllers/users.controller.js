@@ -94,17 +94,17 @@ const pingUser = async (req, res) => {
  */
 const trackDownload = async (req, res) => {
   try {
-    const { email, type, lecture } = req.body;
+    const { email, type, lecture, lectureSlug } = req.body;
 
     const allowed = ["video", "audio", "transcript"];
     if (!email) return res.status(400).json({ success: false, message: "Email is required" });
     if (!allowed.includes(type)) return res.status(400).json({ success: false, message: "Invalid type. Must be video, audio, or transcript." });
 
     // Insert into separate tracking table
-    if (lecture) {
+    if (lecture || lectureSlug) {
       const { error: insertError } = await supabase
         .from("download_history")
-        .insert([{ email, type, lecture }]);
+        .insert([{ email, type, lecture, lecture_slug: lectureSlug || null }]);
       
       if (insertError) {
         console.error("Error inserting into download_history:", insertError);
