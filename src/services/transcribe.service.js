@@ -3,8 +3,13 @@ const fetch = (...args) =>
   import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
 class TranscribeService {
+  isEnabled() {
+    if (process.env.TRANSCRIPT_DISABLED === "true") return false;
+    return Boolean(process.env.LEMONFOX_API_KEY);
+  }
+
   async transcribeUrl(audioUrl) {
-    if (!process.env.LEMONFOX_API_KEY) {
+    if (!this.isEnabled()) {
       throw new Error("Lemonfox API key is not configured.");
     }
 

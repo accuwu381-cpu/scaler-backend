@@ -28,6 +28,18 @@ const getUploadUrl = async (req, res) => {
   }
 };
 
+const getTranscriptHealth = async (req, res) => {
+  try {
+    if (!transcribeService.isEnabled()) {
+      return res.status(503).json({ ok: false, reason: "transcription_disabled" });
+    }
+    return res.status(200).json({ ok: true });
+  } catch (error) {
+    console.error("Transcript health check failed:", error.message);
+    return res.status(503).json({ ok: false, reason: "health_check_failed" });
+  }
+};
+
 const transcribeAudio = async (req, res) => {
   const { path } = req.body;
   try {
@@ -67,5 +79,6 @@ const transcribeAudio = async (req, res) => {
 
 module.exports = {
   getUploadUrl,
+  getTranscriptHealth,
   transcribeAudio,
 };
