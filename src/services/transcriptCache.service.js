@@ -81,8 +81,19 @@ async function saveTranscript(slug, title, text) {
 
   const lectureId = slug;
 
-  // 1. Upsert into MongoDB
+  // 1. Check if existing transcript is larger (in bytes)
   await connectMongo();
+  const existing = await Transcript.findOne({ lectureId }).lean();
+  if (existing && existing.text) {
+    const oldBytes = Buffer.byteLength(existing.text, "utf8");
+    const newBytes = Buffer.byteLength(text, "utf8");
+    if (oldBytes >= newBytes) {
+      console.log(`[Cache Save] Keeping existing transcript for "${title}" (id: ${lectureId}) because it is larger or equal (${oldBytes} bytes vs ${newBytes} bytes).`);
+      return;
+    }
+  }
+
+  // 2. Upsert into MongoDB
   await Transcript.findOneAndUpdate(
     { lectureId },
     { lectureId, title, text },
