@@ -69,13 +69,23 @@ const getAllUsers = async (req, res) => {
 const pingUser = async (req, res) => {
   try {
     const { email } = req.body;
+    console.log("[Ping Debug] Incoming ping request for email:", email);
     if (!email) return res.status(400).json({ success: false, message: "Email is required" });
+
+    // Debug check: does the user exist at all?
+    const { data: existingUser, error: checkError } = await supabase
+      .from("extension_users")
+      .select("*")
+      .eq("email", email);
+    console.log("[Ping Debug] Check existing user query result:", { existingUser, checkError });
 
     const { data, error } = await supabase
       .from("extension_users")
       .update({ last_seen: new Date().toISOString() })
       .eq("email", email)
       .select();
+
+    console.log("[Ping Debug] Update user result:", { data, error });
 
     if (error) throw error;
     if (!data.length) return res.status(404).json({ success: false, message: "User not found" });

@@ -15,15 +15,28 @@ connectMongo().catch((err) =>
 
 const app = express();
 
-// Middleware
 app.use(
   cors({
-    origin: [
-      ...(process.env.NODE_ENV === "development"
-        ? ["http://localhost:3000"]
-        : []),
-      "https://scalerfrontend.vercel.app",
-    ],
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      
+      const allowedOrigins = [
+        "http://localhost:3000",
+        "https://scalerfrontend.vercel.app",
+      ];
+      
+      const isAllowed = 
+        allowedOrigins.includes(origin) ||
+        origin.startsWith("chrome-extension://") ||
+        origin.endsWith("scaler.com") ||
+        origin.includes(".scaler.com");
+
+      if (isAllowed) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
     credentials: true,
   }),
 );
