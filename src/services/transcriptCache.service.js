@@ -75,35 +75,57 @@ async function getCachedTranscript(slug) {
  * @param {string} slug    - Unique lecture slug from Scaler's API (used as lectureId)
  * @param {string} title   - Human-readable lecture title
  * @param {string} text    - Full transcript text
+ * @param {object} [meta]  - Optional metadata added going forward
+ * @param {string} [meta.classId]     - Numeric class id from the session URL
+ * @param {string} [meta.generatedBy] - Email of the generating user
  */
-async function saveTranscript(slug, title, text) {
+async function saveTranscript(slug, title, text, meta = {}) {
   if (!slug || !text) return;
 
   const lectureId = slug;
+  const classId = meta.classId || "";
+  const generatedBy = meta.generatedBy || "";
 
-  // 1. Check if existing transcript is larger (in bytes)
+  // 1. Decide whether to overwrite the stored transcript text.
   await connectMongo();
   const existing = await Transcript.findOne({ lectureId }).lean();
-  if (existing && existing.text) {
-    const oldBytes = Buffer.byteLength(existing.text, "utf8");
-    const newBytes = Buffer.byteLength(text, "utf8");
-    if (oldBytes >= newBytes) {
-      console.log(`[Cache Save] Keeping existing transcript for "${title}" (id: ${lectureId}) because it is larger or equal (${oldBytes} bytes vs ${newBytes} bytes).`);
-      return;
+  const keepExisting =
+    existing &&
+    existing.text &&
+    Buffer.byteLength(existing.text, "utf8") >=
+      Buffer.byteLength(text, "utf8");
+
+  if (keepExisting) {
+    console.log(
+      `[Cache Save] Keeping existing transcript for "${title}" (id: ${lectureId}) because it is larger or equal.`,
+    );
+    // Backfill metadata onto the existing Mongo doc if it's missing.
+    const patch = {};
+    if (!existing.classId && classId) patch.classId = classId;
+    if (!existing.generatedBy && generatedBy) patch.generatedBy = generatedBy;
+    if (Object.keys(patch).length) {
+      await Transcript.updateOne({ lectureId }, { $set: patch });
     }
+  } else {
+    // Overwrite Mongo with the new (larger) transcript + metadata.
+    await Transcript.findOneAndUpdate(
+      { lectureId },
+      { lectureId, title, text, classId, generatedBy },
+      { upsert: true, new: true },
+    );
   }
 
-  // 2. Upsert into MongoDB
-  await Transcript.findOneAndUpdate(
-    { lectureId },
-    { lectureId, title, text },
-    { upsert: true, new: true },
-  );
+  // 2. ALWAYS ensure the Supabase index row exists — decoupled from the
+  //    keep-vs-overwrite decision above so Mongo/Supabase drift self-heals.
+  //    Only include metadata columns when we have values, so a re-save never
+  //    nulls out previously-stored class_id / generated_by.
+  const indexRow = { lecture_id: lectureId, title };
+  if (classId) indexRow.class_id = classId;
+  if (generatedBy) indexRow.generated_by = generatedBy;
 
-  // 2. Upsert into Supabase index
   const { error } = await supabase
     .from("transcripts")
-    .upsert({ lecture_id: lectureId, title }, { onConflict: "lecture_id" });
+    .upsert(indexRow, { onConflict: "lecture_id" });
 
   if (error) {
     console.warn("Supabase transcript index upsert error:", error.message);

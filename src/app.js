@@ -3,6 +3,7 @@ const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const transcribeRoutes = require("./routes/transcribe.routes");
 const transcriptCacheRoutes = require("./routes/transcriptCache.routes");
+const summaryCacheRoutes = require("./routes/summaryCache.routes");
 const authRoutes = require("./routes/auth.routes");
 const messagesRoutes = require("./routes/messages.routes");
 const usersRoutes = require("./routes/users.routes");
@@ -47,6 +48,7 @@ app.use(cookieParser());
 // Routes
 app.use("/api/transcribe", transcribeRoutes);
 app.use("/api/transcript", transcriptCacheRoutes);
+app.use("/api/summary", summaryCacheRoutes);
 app.use("/api/messages", messagesRoutes);
 app.use("/api/users", usersRoutes);
 app.use("/api/auth", authRoutes);

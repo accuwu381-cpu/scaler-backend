@@ -35,7 +35,7 @@ const getTranscript = async (req, res) => {
  */
 const saveTranscriptHandler = async (req, res) => {
   try {
-    const { slug, title, text } = req.body;
+    const { slug, title, text, classId, generatedBy } = req.body;
     const lectureSlug = slug || title; // backward compat: old clients send title only
 
     if (!lectureSlug || !lectureSlug.trim()) {
@@ -45,7 +45,15 @@ const saveTranscriptHandler = async (req, res) => {
       return res.status(400).json({ error: "'text' is required." });
     }
 
-    await saveTranscript(lectureSlug.trim(), title?.trim() || lectureSlug.trim(), text.trim());
+    await saveTranscript(
+      lectureSlug.trim(),
+      title?.trim() || lectureSlug.trim(),
+      text.trim(),
+      {
+        classId: classId ? String(classId).trim() : "",
+        generatedBy: generatedBy?.trim() || "",
+      },
+    );
     return res.status(200).json({ success: true });
   } catch (err) {
     console.error("saveTranscript error:", err.message);

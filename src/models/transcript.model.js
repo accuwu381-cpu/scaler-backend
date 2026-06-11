@@ -26,6 +26,16 @@ const transcriptSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    // Numeric class id from the session URL, stored as metadata (added going forward).
+    classId: {
+      type: String,
+      default: "",
+    },
+    // Email of the user who generated the transcript (added going forward).
+    generatedBy: {
+      type: String,
+      default: "",
+    },
   },
   {
     timestamps: true, // adds createdAt + updatedAt
