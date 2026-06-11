@@ -32,6 +32,11 @@ const summarySchema = new mongoose.Schema(
       required: true,
     },
     summary: {
+      // Story-telling brief as an ordered list of { title, body } concepts.
+      brief: {
+        type: [{ title: String, body: String }],
+        default: [],
+      },
       topics: { type: [String], default: [] },
       notes: { type: [String], default: [] },
       deadlines: { type: [String], default: [] },

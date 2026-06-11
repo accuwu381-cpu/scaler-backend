@@ -16,8 +16,30 @@ function normaliseSummary(raw) {
       .filter(Boolean);
   };
 
+  const normaliseBrief = (val) => {
+    if (!val) return [];
+    if (typeof val === "string") {
+      const t = val.trim();
+      return t ? [{ title: "", body: t }] : [];
+    }
+    if (!Array.isArray(val)) return [];
+    return val
+      .map((c) => {
+        if (typeof c === "string") return { title: "", body: c.trim() };
+        if (c && typeof c === "object") {
+          return {
+            title: String(c.title || "").trim(),
+            body: String(c.body || c.text || "").trim(),
+          };
+        }
+        return null;
+      })
+      .filter((c) => c && (c.title || c.body));
+  };
+
   const obj = raw && typeof raw === "object" ? raw : {};
   return {
+    brief: normaliseBrief(obj.brief),
     topics: toStringArray(obj.topics),
     notes: toStringArray(obj.notes),
     deadlines: toStringArray(obj.deadlines),
