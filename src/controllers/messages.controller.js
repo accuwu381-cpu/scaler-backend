@@ -69,7 +69,7 @@ const createMessage = async (req, res) => {
       return res.status(400).json({
         success: false,
         message:
-          "Security Error: High-level HTML tags (html, body, script, iframe, etc.) are not allowed.",
+          "Security Error: High-level HTML tags (html, body, iframe, etc.) are not allowed.",
       });
     }
 
@@ -108,7 +108,7 @@ const updateMessage = async (req, res) => {
       return res.status(400).json({
         success: false,
         message:
-          "Security Error: High-level HTML tags (html, body, script, iframe, etc.) are not allowed.",
+          "Security Error: High-level HTML tags (html, body, iframe, etc.) are not allowed.",
       });
     }
 
