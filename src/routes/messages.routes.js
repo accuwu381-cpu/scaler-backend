@@ -6,6 +6,7 @@ const {
   createMessage,
   updateMessage,
   deleteMessage,
+  previewAudience,
   syncUser,
 } = require("../controllers/messages.controller");
 
@@ -16,6 +17,9 @@ router.post("/sync-user", syncUser);
 
 // Apply security middleware to all other routes
 router.use(verifyToken);
+
+// Audience blast-radius preview (must sit above /:id to stay unambiguous)
+router.get("/audience-preview", previewAudience);
 
 // Basic Admin CRUD routes
 router.get("/", getAllMessages);

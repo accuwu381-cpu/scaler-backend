@@ -1,30 +1,6 @@
 const supabase = require("../services/supabase");
-
-/**
- * Parse batch year and course from email.
- * Email format: name.{year}{course}{rollno}@sst.scaler.com
- * Example: ritesh.24bcs10088@sst.scaler.com -> batch: '24', course: 'bcs', roll: '10088'
- */
-const parseEmail = (email) => {
-  try {
-    const localPart = email.split("@")[0]; // e.g. ritesh.24bcs10088
-    const dotIdx = localPart.lastIndexOf(".");
-    if (dotIdx === -1) return null;
-    const code = localPart.slice(dotIdx + 1); // e.g. 24bcs10088
-
-    // Match: (2 digit year)(2-3 letter course)(5 digit roll)
-    const match = code.match(/^(\d{2})([a-zA-Z]+)(\d{5})$/);
-    if (!match) return null;
-
-    return {
-      batch: match[1],        // "24"
-      course: match[2].toLowerCase(), // "bcs"
-      rollNumber: match[3],   // "10088"
-    };
-  } catch {
-    return null;
-  }
-};
+// parseEmail is shared with the messages controller (audience targeting).
+const { parseEmail } = require("../utils/email.utils");
 
 // ─── Helpers for query building ──────────────────────────────────────────────
 
