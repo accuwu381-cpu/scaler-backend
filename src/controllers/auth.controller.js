@@ -9,8 +9,8 @@ const loginAdmin = (req, res) => {
   const JWT_SECRET = process.env.JWT_SECRET;
 
   if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
-    // Generate a JWT token valid for 10 minutes
-    const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: "30m" });
+    // Generate a JWT token valid for 1 hour
+    const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: "1h" });
 
     // Set JWT as a secure cookie
     res.cookie("adminToken", token, {
