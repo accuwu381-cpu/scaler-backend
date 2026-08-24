@@ -130,14 +130,19 @@ async function listTranscriptVersions(slug) {
   if (!slug) return [];
 
   await connectMongo();
-  const docs = await TranscriptVersion.find({ lectureId: slug })
-    .select("-text")
-    .sort({ createdAt: -1 })
-    .lean();
+
+  // Mongo holds the versions, Supabase holds the votes, and neither depends on
+  // the other — running them back to back doubled the page's wait for nothing.
+  const [docs, tallies] = await Promise.all([
+    TranscriptVersion.find({ lectureId: slug })
+      .select("-text")
+      .sort({ createdAt: -1 })
+      .lean(),
+    fetchVoteTallies(slug),
+  ]);
 
   if (!docs.length) return [];
 
-  const tallies = await fetchVoteTallies(slug);
   return docs.map((doc) => toVersionMeta(doc, tallies[doc.versionId]));
 }
 
@@ -168,9 +173,11 @@ async function getCachedTranscript(slug) {
 
   await connectMongo();
 
-  const docs = await TranscriptVersion.find({ lectureId: slug }).lean();
+  const [docs, tallies] = await Promise.all([
+    TranscriptVersion.find({ lectureId: slug }).lean(),
+    fetchVoteTallies(slug),
+  ]);
   if (docs.length) {
-    const tallies = await fetchVoteTallies(slug);
     const ranked = rankVersions(
       docs.map((doc) => ({ ...doc, ...(tallies[doc.versionId] || {}) })),
     );
@@ -367,12 +374,12 @@ async function recordDownloadForLecture(slug) {
   if (!slug) return null;
 
   await connectMongo();
-  const docs = await TranscriptVersion.find({ lectureId: slug })
-    .select("-text")
-    .lean();
+  const [docs, tallies] = await Promise.all([
+    TranscriptVersion.find({ lectureId: slug }).select("-text").lean(),
+    fetchVoteTallies(slug),
+  ]);
   if (!docs.length) return null; // legacy-only lecture: nothing to count against
 
-  const tallies = await fetchVoteTallies(slug);
   const ranked = rankVersions(
     docs.map((doc) => ({ ...doc, ...(tallies[doc.versionId] || {}) })),
   );
