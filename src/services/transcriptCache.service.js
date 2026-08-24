@@ -213,6 +213,9 @@ async function getCachedTranscript(slug) {
  * @param {string} [meta.generatedBy] - Email of the generating user
  * @param {string} [meta.provider]    - Transcription provider used
  * @param {string} [meta.model]       - Model id used
+ * @param {boolean} [meta.countDownload] - The caller also handed the user the
+ *        file (the processor page downloads as soon as it finishes), so this
+ *        save counts as a download of the version too.
  * @returns {Promise<{versionId: string, created: boolean}|null>}
  */
 async function saveTranscript(slug, title, text, meta = {}) {
@@ -225,11 +228,13 @@ async function saveTranscript(slug, title, text, meta = {}) {
   const generatedBy = meta.generatedBy || "";
   const provider = meta.provider || "";
   const model = meta.model || "";
+  const countDownload = meta.countDownload === true;
 
   await connectMongo();
 
   const existing = await TranscriptVersion.findOne({ versionId }).lean();
   let created = false;
+  let downloadCount = existing?.downloadCount || 0;
 
   if (existing) {
     // Same text already stored. Only fill in metadata we did not have — an
@@ -240,8 +245,16 @@ async function saveTranscript(slug, title, text, meta = {}) {
     for (const [key, value] of Object.entries(metaFields)) {
       if (value && !existing[key]) patch[key] = value;
     }
-    if (Object.keys(patch).length) {
-      await TranscriptVersion.updateOne({ versionId }, { $set: patch });
+    const update = {};
+    if (Object.keys(patch).length) update.$set = patch;
+    if (countDownload) update.$inc = { downloadCount: 1 };
+    if (Object.keys(update).length) {
+      const updated = await TranscriptVersion.findOneAndUpdate(
+        { versionId },
+        update,
+        { new: true },
+      ).lean();
+      downloadCount = updated?.downloadCount ?? downloadCount;
     }
     console.log(
       `[Cache Save] Version ${versionId} already exists for "${title}" (${lectureId}) — metadata merged.`,
@@ -257,9 +270,12 @@ async function saveTranscript(slug, title, text, meta = {}) {
       model,
       generatedBy,
       charCount: [...trimmed].length,
-      downloadCount: 0,
+      // Generating a transcript hands the user the file immediately, so that
+      // first download is real and should show up on the counter.
+      downloadCount: countDownload ? 1 : 0,
     });
     created = true;
+    downloadCount = countDownload ? 1 : 0;
     console.log(
       `✅ New transcript version ${versionId} stored for "${title}" (${lectureId}).`,
     );
@@ -278,6 +294,7 @@ async function saveTranscript(slug, title, text, meta = {}) {
   if (provider) versionRow.provider = provider;
   if (model) versionRow.model = model;
   if (created) versionRow.char_count = [...trimmed].length;
+  if (created || countDownload) versionRow.download_count = downloadCount;
 
   const { error: versionError } = await supabase
     .from("transcript_versions")
@@ -298,7 +315,7 @@ async function saveTranscript(slug, title, text, meta = {}) {
     console.warn("Supabase transcript index upsert error:", lectureError.message);
   }
 
-  return { versionId, created };
+  return { versionId, created, downloadCount };
 }
 
 /**
@@ -331,6 +348,35 @@ async function recordVersionDownload(versionId) {
   }
 
   return { versionId, downloadCount: updated.downloadCount };
+}
+
+/**
+ * Count a download for a lecture when the caller could not say WHICH version
+ * it took.
+ *
+ * Extension builds that predate versioning fetch `GET /api/transcript`, which
+ * hands back the best-ranked version, and then report the download without a
+ * versionId. Counting the plain GET itself is not an option — the summary panel
+ * hits the same endpoint just to ask "does a transcript exist?", and that probe
+ * fires every time the panel opens — so the download report is the only
+ * trustworthy signal that a file actually reached someone.
+ *
+ * Resolves the same version the GET would have served and bumps it.
+ */
+async function recordDownloadForLecture(slug) {
+  if (!slug) return null;
+
+  await connectMongo();
+  const docs = await TranscriptVersion.find({ lectureId: slug })
+    .select("-text")
+    .lean();
+  if (!docs.length) return null; // legacy-only lecture: nothing to count against
+
+  const tallies = await fetchVoteTallies(slug);
+  const ranked = rankVersions(
+    docs.map((doc) => ({ ...doc, ...(tallies[doc.versionId] || {}) })),
+  );
+  return recordVersionDownload(ranked[0].versionId);
 }
 
 /**
@@ -430,6 +476,7 @@ module.exports = {
   listTranscriptVersions,
   getTranscriptVersion,
   recordVersionDownload,
+  recordDownloadForLecture,
   voteOnVersion,
   getUserVotes,
   deleteTranscriptVersion,

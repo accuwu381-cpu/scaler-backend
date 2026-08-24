@@ -1,4 +1,5 @@
 const supabase = require("../services/supabase");
+const { recordDownloadForLecture } = require("../services/transcriptCache.service");
 // parseEmail is shared with the messages controller (audience targeting).
 const { parseEmail } = require("../utils/email.utils");
 
@@ -351,6 +352,20 @@ const trackDownload = async (req, res) => {
         // download; the version's own download_count is bumped separately and
         // only on a deliberate pick from the versions page.
         row.version_id = clean(versionId);
+
+        // Bump the version's own counter only when nobody else already did.
+        // A client that names a versionId went through the versions page, which
+        // counts via POST /version/:id/download; source "generated" was counted
+        // by the save that created it. What is left is an older build that just
+        // took whatever GET /api/transcript served it.
+        if (!row.version_id && row.source !== "generated") {
+          const lectureKey = clean(lectureSlug);
+          if (lectureKey) {
+            recordDownloadForLecture(lectureKey).catch((err) =>
+              console.warn("Version download count failed:", err.message),
+            );
+          }
+        }
       }
 
       const { error: insertError } = await supabase

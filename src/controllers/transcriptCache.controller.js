@@ -178,7 +178,7 @@ const deleteVersion = async (req, res) => {
  */
 const saveTranscriptHandler = async (req, res) => {
   try {
-    const { slug, title, text, classId, generatedBy, provider } = req.body;
+    const { slug, title, text, classId, generatedBy, provider, countDownload } = req.body;
     const model = req.body.model || req.body.modelName;
     const lectureSlug = slug || title; // backward compat: old clients send title only
 
@@ -198,6 +198,7 @@ const saveTranscriptHandler = async (req, res) => {
         generatedBy: generatedBy?.trim() || "",
         provider: provider?.trim() || "",
         model: model?.trim() || "",
+        countDownload: countDownload === true,
       },
     );
     return res.status(200).json({ success: true, ...(result || {}) });
