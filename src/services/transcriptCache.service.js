@@ -66,7 +66,12 @@ async function getCachedTranscript(slug) {
     return null;
   }
 
-  return { text: doc.text };
+  return {
+    text: doc.text,
+    generatedBy: doc.generatedBy || "",
+    provider: doc.provider || "",
+    model: doc.model || "",
+  };
 }
 
 /**
@@ -78,6 +83,8 @@ async function getCachedTranscript(slug) {
  * @param {object} [meta]  - Optional metadata added going forward
  * @param {string} [meta.classId]     - Numeric class id from the session URL
  * @param {string} [meta.generatedBy] - Email of the generating user
+ * @param {string} [meta.provider]    - Transcription provider used
+ * @param {string} [meta.model]       - Model id used
  */
 async function saveTranscript(slug, title, text, meta = {}) {
   if (!slug || !text) return;
@@ -85,6 +92,8 @@ async function saveTranscript(slug, title, text, meta = {}) {
   const lectureId = slug;
   const classId = meta.classId || "";
   const generatedBy = meta.generatedBy || "";
+  const provider = meta.provider || "";
+  const model = meta.model || "";
 
   // 1. Decide whether to overwrite the stored transcript text.
   await connectMongo();
@@ -95,33 +104,52 @@ async function saveTranscript(slug, title, text, meta = {}) {
     Buffer.byteLength(existing.text, "utf8") >=
       Buffer.byteLength(text, "utf8");
 
+  // Metadata is only ever written when we actually have a value. Older
+  // extension builds POST without classId/generatedBy/provider/model, and a
+  // blind write would blank out metadata a newer client already stored.
+  const metaFields = { classId, generatedBy, provider, model };
+
   if (keepExisting) {
     console.log(
       `[Cache Save] Keeping existing transcript for "${title}" (id: ${lectureId}) because it is larger or equal.`,
     );
     // Backfill metadata onto the existing Mongo doc if it's missing.
     const patch = {};
-    if (!existing.classId && classId) patch.classId = classId;
-    if (!existing.generatedBy && generatedBy) patch.generatedBy = generatedBy;
+    for (const [key, value] of Object.entries(metaFields)) {
+      if (value && !existing[key]) patch[key] = value;
+    }
     if (Object.keys(patch).length) {
       await Transcript.updateOne({ lectureId }, { $set: patch });
     }
   } else {
-    // Overwrite Mongo with the new (larger) transcript + metadata.
+    // Overwrite Mongo with the new (larger) transcript, but merge metadata:
+    // supplied values win, absent ones keep whatever is already stored.
+    const doc = { lectureId, title, text };
+    for (const [key, value] of Object.entries(metaFields)) {
+      const resolved = value || (existing && existing[key]) || "";
+      if (resolved) doc[key] = resolved;
+    }
     await Transcript.findOneAndUpdate(
       { lectureId },
-      { lectureId, title, text, classId, generatedBy },
+      doc,
       { upsert: true, new: true },
     );
   }
 
   // 2. ALWAYS ensure the Supabase index row exists — decoupled from the
   //    keep-vs-overwrite decision above so Mongo/Supabase drift self-heals.
-  //    Only include metadata columns when we have values, so a re-save never
-  //    nulls out previously-stored class_id / generated_by.
+  //    Only include metadata columns when we have values, so a re-save from an
+  //    older extension build never nulls out previously-stored metadata.
   const indexRow = { lecture_id: lectureId, title };
-  if (classId) indexRow.class_id = classId;
-  if (generatedBy) indexRow.generated_by = generatedBy;
+  const indexMeta = {
+    class_id: classId || existing?.classId,
+    generated_by: generatedBy || existing?.generatedBy,
+    provider: provider || existing?.provider,
+    model: model || existing?.model,
+  };
+  for (const [column, value] of Object.entries(indexMeta)) {
+    if (value) indexRow[column] = value;
+  }
 
   const { error } = await supabase
     .from("transcripts")

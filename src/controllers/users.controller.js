@@ -315,10 +315,16 @@ const pingUser = async (req, res) => {
  * POST /api/users/download
  * Increments the download counter (video | audio | transcript) for a user.
  * Public endpoint — called by the extension.
+ *
+ * Body: { email, type, lecture?, lectureSlug?, provider?, model?, source? }
+ * provider/model/source are transcript-only and optional — extension builds
+ * that predate them simply leave the columns NULL.
  */
 const trackDownload = async (req, res) => {
   try {
-    const { email, type, lecture, lectureSlug } = req.body;
+    const { email, type, lecture, lectureSlug, provider, source } = req.body;
+    // Accept `model` or the older `modelName` spelling from the extension.
+    const model = req.body.model || req.body.modelName;
 
     const allowed = ["video", "audio", "transcript"];
     if (!email) return res.status(400).json({ success: false, message: "Email is required" });
@@ -326,9 +332,26 @@ const trackDownload = async (req, res) => {
 
     // Insert into separate tracking table
     if (lecture || lectureSlug) {
+      const row = { email, type, lecture, lecture_slug: lectureSlug || null };
+
+      // Transcription attribution only applies to transcripts, and a CHECK
+      // constraint on download_history enforces that. Old extension builds
+      // omit these fields entirely (columns stay NULL); a confused client
+      // sending them on a video/audio row would trip the constraint and lose
+      // the whole history row, so strip rather than trust.
+      if (type === "transcript") {
+        const clean = (v) => (typeof v === "string" && v.trim() ? v.trim() : null);
+        row.provider = clean(provider);
+        row.model = clean(model);
+        // Anything other than the two known values is dropped, not rejected —
+        // a bad `source` must never cost us the row or the counter bump.
+        const src = clean(source);
+        row.source = src === "cache" || src === "generated" ? src : null;
+      }
+
       const { error: insertError } = await supabase
         .from("download_history")
-        .insert([{ email, type, lecture, lecture_slug: lectureSlug || null }]);
+        .insert([row]);
       
       if (insertError) {
         console.error("Error inserting into download_history:", insertError);

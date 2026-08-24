@@ -20,7 +20,15 @@ const getTranscript = async (req, res) => {
       return res.status(404).json({ cached: false });
     }
 
-    return res.status(200).json({ cached: true, text: cached.text });
+    return res.status(200).json({
+      cached: true,
+      text: cached.text,
+      generatedBy: cached.generatedBy || "",
+      provider: cached.provider || "",
+      model: cached.model || "",
+      // Legacy alias so extension builds that read `modelName` keep working.
+      modelName: cached.model || "",
+    });
   } catch (err) {
     console.error("getTranscript error:", err.message);
     return res.status(500).json({ error: "Cache lookup failed.", details: err.message });
@@ -29,13 +37,17 @@ const getTranscript = async (req, res) => {
 
 /**
  * POST /api/transcript/save
- * Body: { slug: string, title: string, text: string }
+ * Body: { slug, title, text, classId?, generatedBy?, provider?, model? }
+ * `modelName` is accepted as a legacy alias for `model`.
+ * All metadata is optional — older extension builds omit it, and an omitted
+ * field never overwrites metadata already stored for the lecture.
  * Saves transcript to MongoDB + indexes in Supabase.
  * `slug` is the unique lecture identifier; `title` is the human-readable name.
  */
 const saveTranscriptHandler = async (req, res) => {
   try {
-    const { slug, title, text, classId, generatedBy } = req.body;
+    const { slug, title, text, classId, generatedBy, provider } = req.body;
+    const model = req.body.model || req.body.modelName;
     const lectureSlug = slug || title; // backward compat: old clients send title only
 
     if (!lectureSlug || !lectureSlug.trim()) {
@@ -52,6 +64,8 @@ const saveTranscriptHandler = async (req, res) => {
       {
         classId: classId ? String(classId).trim() : "",
         generatedBy: generatedBy?.trim() || "",
+        provider: provider?.trim() || "",
+        model: model?.trim() || "",
       },
     );
     return res.status(200).json({ success: true });

@@ -36,6 +36,18 @@ const transcriptSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    // Transcription provider used to generate the text (e.g. "groq", "openai").
+    provider: {
+      type: String,
+      default: "",
+    },
+    // Model id used to generate the text (e.g. "whisper-large-v3").
+    // Matches summaries.model; reads go through .lean() so the Mongoose
+    // `model` reserved-path warning has no practical effect here.
+    model: {
+      type: String,
+      default: "",
+    },
   },
   {
     timestamps: true, // adds createdAt + updatedAt
