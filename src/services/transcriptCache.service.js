@@ -1,6 +1,8 @@
+const crypto = require("crypto");
 const supabase = require("./supabase");
 const { connectMongo } = require("./mongodb");
 const Transcript = require("../models/transcript.model");
+const TranscriptVersion = require("../models/transcriptVersion.model");
 
 /**
  * Build a deterministic lectureId from the lecture identifier.
@@ -29,138 +31,407 @@ function buildLectureId(titleOrSlug) {
 }
 
 /**
- * Look up a cached transcript by lecture slug.
+ * Content-addressed version id, scoped to the lecture.
  *
- * Flow:
- *  1. Use slug directly as lectureId (or derive from title for legacy).
- *  2. Query Supabase `transcripts` table for a row with that lecture_id.
- *  3. If found, fetch the full text from MongoDB by lectureId.
- *  4. Return { text } or null if not cached.
+ * Hashing the text alone looked tidy but was wrong: the legacy data has the
+ * same lecture stored under several slug formats (a UUID slug, a kebab slug and
+ * the raw title), so identical transcripts under different lectureIds collapsed
+ * into ONE document owned by whichever lecture got there first — the others
+ * silently ended up with no version at all. Mixing the lectureId in keeps
+ * dedup where it matters (re-running the same model on the same lecture) while
+ * letting two lectures hold identical text.
  */
-async function getCachedTranscript(slug) {
-  if (!slug) return null;
+function buildVersionId(lectureId, text) {
+  return crypto
+    .createHash("sha256")
+    .update(`${lectureId || ""}\u0000${(text || "").trim()}`, "utf8")
+    .digest("hex")
+    .slice(0, 32);
+}
 
-  const lectureId = slug;
+/**
+ * Tally up/down votes for every version of a lecture in one query.
+ * Votes are authoritative rows rather than counter columns, so a concurrent
+ * vote can never lose a race against another.
+ *
+ * Returns { [versionId]: { upvotes, downvotes } } — empty on any failure,
+ * because votes are decoration and must never break a transcript fetch.
+ */
+async function fetchVoteTallies(lectureId) {
+  const tallies = {};
+  try {
+    const { data, error } = await supabase
+      .from("transcript_version_votes")
+      .select("version_id, vote")
+      .eq("lecture_id", lectureId);
 
-  // 1. Check Supabase index
-  const { data, error } = await supabase
-    .from("transcripts")
-    .select("lecture_id")
-    .eq("lecture_id", lectureId)
-    .maybeSingle();
+    if (error) {
+      console.warn("Supabase vote tally error:", error.message);
+      return tallies;
+    }
 
-  if (error) {
-    console.warn("Supabase transcript lookup error:", error.message);
-    return null;
+    for (const row of data || []) {
+      const tally = (tallies[row.version_id] ||= { upvotes: 0, downvotes: 0 });
+      if (row.vote === "up") tally.upvotes += 1;
+      else if (row.vote === "down") tally.downvotes += 1;
+    }
+  } catch (err) {
+    console.warn("Vote tally failed:", err.message);
   }
+  return tallies;
+}
 
-  if (!data) return null; // not in index → not cached
+/**
+ * Rank versions best-first.
+ *
+ * Net votes lead, because that is the only signal that directly encodes "this
+ * transcript is garbage". Downloads break ties (weak but real evidence), then
+ * recency. This ordering is what old single-transcript clients receive, so a
+ * downvoted version stops being served without anyone deleting anything.
+ */
+function rankVersions(versions) {
+  return [...versions].sort((a, b) => {
+    const scoreA = (a.upvotes || 0) - (a.downvotes || 0);
+    const scoreB = (b.upvotes || 0) - (b.downvotes || 0);
+    if (scoreA !== scoreB) return scoreB - scoreA;
 
-  // 2. Fetch full text from MongoDB
-  await connectMongo();
-  const doc = await Transcript.findOne({ lectureId }).lean();
-  if (!doc) {
-    console.warn(
-      `Supabase has index for "${lectureId}" but MongoDB doc missing.`,
-    );
-    return null;
-  }
+    const downloadsA = a.downloadCount || 0;
+    const downloadsB = b.downloadCount || 0;
+    if (downloadsA !== downloadsB) return downloadsB - downloadsA;
 
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+  });
+}
+
+/** Shape a Mongo version doc for the API — never includes `text`. */
+function toVersionMeta(doc, tally = {}) {
   return {
-    text: doc.text,
-    generatedBy: doc.generatedBy || "",
+    versionId: doc.versionId,
+    lectureId: doc.lectureId,
+    title: doc.title || "",
     provider: doc.provider || "",
     model: doc.model || "",
+    generatedBy: doc.generatedBy || "",
+    charCount: doc.charCount || 0,
+    downloadCount: doc.downloadCount || 0,
+    upvotes: tally.upvotes || 0,
+    downvotes: tally.downvotes || 0,
+    createdAt: doc.createdAt,
   };
 }
 
 /**
- * Save a newly generated transcript to MongoDB and index it in Supabase.
+ * List every version of a lecture, newest first, WITHOUT the transcript text.
+ *
+ * Transcripts routinely exceed 50 KB, so the versions page renders from this
+ * and fetches text only when a row is expanded or downloaded.
+ */
+async function listTranscriptVersions(slug) {
+  if (!slug) return [];
+
+  await connectMongo();
+  const docs = await TranscriptVersion.find({ lectureId: slug })
+    .select("-text")
+    .sort({ createdAt: -1 })
+    .lean();
+
+  if (!docs.length) return [];
+
+  const tallies = await fetchVoteTallies(slug);
+  return docs.map((doc) => toVersionMeta(doc, tallies[doc.versionId]));
+}
+
+/** Fetch one version including its text. */
+async function getTranscriptVersion(versionId) {
+  if (!versionId) return null;
+
+  await connectMongo();
+  const doc = await TranscriptVersion.findOne({ versionId }).lean();
+  if (!doc) return null;
+
+  const tallies = await fetchVoteTallies(doc.lectureId);
+  return { ...toVersionMeta(doc, tallies[doc.versionId]), text: doc.text };
+}
+
+/**
+ * Look up the best cached transcript for a lecture.
+ *
+ * Response shape is unchanged from the single-transcript era so extension
+ * builds that predate versioning keep working — they simply receive whichever
+ * version currently ranks highest.
+ *
+ * Falls back to the legacy `transcripts` collection for lectures that have not
+ * been backfilled into versions yet.
+ */
+async function getCachedTranscript(slug) {
+  if (!slug) return null;
+
+  await connectMongo();
+
+  const docs = await TranscriptVersion.find({ lectureId: slug }).lean();
+  if (docs.length) {
+    const tallies = await fetchVoteTallies(slug);
+    const ranked = rankVersions(
+      docs.map((doc) => ({ ...doc, ...(tallies[doc.versionId] || {}) })),
+    );
+    const best = ranked[0];
+    return {
+      text: best.text,
+      generatedBy: best.generatedBy || "",
+      provider: best.provider || "",
+      model: best.model || "",
+      versionId: best.versionId,
+      versionCount: docs.length,
+    };
+  }
+
+  // ── Legacy path: lectures not yet backfilled into versions ────────────
+  const legacy = await Transcript.findOne({ lectureId: slug }).lean();
+  if (!legacy || !legacy.text) return null;
+
+  return {
+    text: legacy.text,
+    generatedBy: legacy.generatedBy || "",
+    provider: legacy.provider || "",
+    model: legacy.model || "",
+    versionId: "",
+    versionCount: 1,
+  };
+}
+
+/**
+ * Save a generated transcript as a new version of the lecture.
+ *
+ * Never overwrites and never rejects. Identical text collapses onto the
+ * existing version (content-addressed id) and only backfills missing metadata.
  *
  * @param {string} slug    - Unique lecture slug from Scaler's API (used as lectureId)
  * @param {string} title   - Human-readable lecture title
  * @param {string} text    - Full transcript text
- * @param {object} [meta]  - Optional metadata added going forward
+ * @param {object} [meta]  - Optional metadata; older extension builds omit it
  * @param {string} [meta.classId]     - Numeric class id from the session URL
  * @param {string} [meta.generatedBy] - Email of the generating user
  * @param {string} [meta.provider]    - Transcription provider used
  * @param {string} [meta.model]       - Model id used
+ * @returns {Promise<{versionId: string, created: boolean}|null>}
  */
 async function saveTranscript(slug, title, text, meta = {}) {
-  if (!slug || !text) return;
+  if (!slug || !text) return null;
 
   const lectureId = slug;
+  const trimmed = text.trim();
+  const versionId = buildVersionId(lectureId, trimmed);
   const classId = meta.classId || "";
   const generatedBy = meta.generatedBy || "";
   const provider = meta.provider || "";
   const model = meta.model || "";
 
-  // 1. Decide whether to overwrite the stored transcript text.
   await connectMongo();
-  const existing = await Transcript.findOne({ lectureId }).lean();
-  const keepExisting =
-    existing &&
-    existing.text &&
-    Buffer.byteLength(existing.text, "utf8") >=
-      Buffer.byteLength(text, "utf8");
 
-  // Metadata is only ever written when we actually have a value. Older
-  // extension builds POST without classId/generatedBy/provider/model, and a
-  // blind write would blank out metadata a newer client already stored.
-  const metaFields = { classId, generatedBy, provider, model };
+  const existing = await TranscriptVersion.findOne({ versionId }).lean();
+  let created = false;
 
-  if (keepExisting) {
-    console.log(
-      `[Cache Save] Keeping existing transcript for "${title}" (id: ${lectureId}) because it is larger or equal.`,
-    );
-    // Backfill metadata onto the existing Mongo doc if it's missing.
+  if (existing) {
+    // Same text already stored. Only fill in metadata we did not have — an
+    // older extension build re-uploading must never blank out what a newer
+    // one recorded.
     const patch = {};
+    const metaFields = { classId, generatedBy, provider, model, title };
     for (const [key, value] of Object.entries(metaFields)) {
       if (value && !existing[key]) patch[key] = value;
     }
     if (Object.keys(patch).length) {
-      await Transcript.updateOne({ lectureId }, { $set: patch });
+      await TranscriptVersion.updateOne({ versionId }, { $set: patch });
     }
+    console.log(
+      `[Cache Save] Version ${versionId} already exists for "${title}" (${lectureId}) — metadata merged.`,
+    );
   } else {
-    // Overwrite Mongo with the new (larger) transcript, but merge metadata:
-    // supplied values win, absent ones keep whatever is already stored.
-    const doc = { lectureId, title, text };
-    for (const [key, value] of Object.entries(metaFields)) {
-      const resolved = value || (existing && existing[key]) || "";
-      if (resolved) doc[key] = resolved;
-    }
-    await Transcript.findOneAndUpdate(
-      { lectureId },
-      doc,
-      { upsert: true, new: true },
+    await TranscriptVersion.create({
+      versionId,
+      lectureId,
+      title: title || lectureId,
+      classId,
+      text: trimmed,
+      provider,
+      model,
+      generatedBy,
+      charCount: [...trimmed].length,
+      downloadCount: 0,
+    });
+    created = true;
+    console.log(
+      `✅ New transcript version ${versionId} stored for "${title}" (${lectureId}).`,
     );
   }
 
-  // 2. ALWAYS ensure the Supabase index row exists — decoupled from the
-  //    keep-vs-overwrite decision above so Mongo/Supabase drift self-heals.
-  //    Only include metadata columns when we have values, so a re-save from an
-  //    older extension build never nulls out previously-stored metadata.
-  const indexRow = { lecture_id: lectureId, title };
-  const indexMeta = {
-    class_id: classId || existing?.classId,
-    generated_by: generatedBy || existing?.generatedBy,
-    provider: provider || existing?.provider,
-    model: model || existing?.model,
+  // ── Mirror metadata into Supabase (no text) ───────────────────────────
+  // Index rows are best-effort: MongoDB is already durable at this point, so a
+  // Supabase hiccup must not fail the save.
+  const versionRow = {
+    id: versionId,
+    lecture_id: lectureId,
+    title: title || lectureId,
   };
-  for (const [column, value] of Object.entries(indexMeta)) {
-    if (value) indexRow[column] = value;
+  if (classId) versionRow.class_id = classId;
+  if (generatedBy) versionRow.generated_by = generatedBy;
+  if (provider) versionRow.provider = provider;
+  if (model) versionRow.model = model;
+  if (created) versionRow.char_count = [...trimmed].length;
+
+  const { error: versionError } = await supabase
+    .from("transcript_versions")
+    .upsert(versionRow, { onConflict: "id" });
+  if (versionError) {
+    console.warn("Supabase version upsert error:", versionError.message);
   }
 
-  const { error } = await supabase
+  // Lecture-level index row — kept so "does this lecture have transcripts?"
+  // stays a single cheap lookup, and for admin browsing.
+  const { error: lectureError } = await supabase
     .from("transcripts")
-    .upsert(indexRow, { onConflict: "lecture_id" });
-
-  if (error) {
-    console.warn("Supabase transcript index upsert error:", error.message);
-    // Non-fatal — the MongoDB document is already saved.
+    .upsert(
+      { lecture_id: lectureId, title: title || lectureId },
+      { onConflict: "lecture_id" },
+    );
+  if (lectureError) {
+    console.warn("Supabase transcript index upsert error:", lectureError.message);
   }
 
-  console.log(`✅ Transcript cached for: "${title}" (id: ${lectureId})`);
+  return { versionId, created };
 }
 
-module.exports = { getCachedTranscript, saveTranscript, buildLectureId };
+/**
+ * Count an explicit download of one version.
+ *
+ * Only called when someone presses Download on a specific version — opening or
+ * previewing must not inflate the number, or the counter stops meaning
+ * "people deliberately chose this one".
+ */
+async function recordVersionDownload(versionId) {
+  if (!versionId) return null;
+
+  await connectMongo();
+  const updated = await TranscriptVersion.findOneAndUpdate(
+    { versionId },
+    { $inc: { downloadCount: 1 } },
+    { new: true },
+  ).lean();
+
+  if (!updated) return null;
+
+  // Mirror the authoritative Mongo value, so the two stores converge even if a
+  // previous mirror write was lost.
+  const { error } = await supabase
+    .from("transcript_versions")
+    .update({ download_count: updated.downloadCount })
+    .eq("id", versionId);
+  if (error) {
+    console.warn("Supabase download_count mirror error:", error.message);
+  }
+
+  return { versionId, downloadCount: updated.downloadCount };
+}
+
+/**
+ * Record (or change, or clear) one user's vote on a version.
+ *
+ * One row per (version, email) — voting again replaces the previous vote, and
+ * `vote: null` withdraws it. Returns the fresh tally for that version.
+ */
+async function voteOnVersion(versionId, email, vote) {
+  if (!versionId || !email) return null;
+
+  await connectMongo();
+  const version = await TranscriptVersion.findOne({ versionId })
+    .select("versionId lectureId")
+    .lean();
+  if (!version) return null;
+
+  if (vote === null) {
+    const { error } = await supabase
+      .from("transcript_version_votes")
+      .delete()
+      .eq("version_id", versionId)
+      .eq("email", email);
+    if (error) throw new Error(error.message);
+  } else {
+    const { error } = await supabase.from("transcript_version_votes").upsert(
+      {
+        version_id: versionId,
+        lecture_id: version.lectureId,
+        email,
+        vote,
+      },
+      { onConflict: "version_id,email" },
+    );
+    if (error) throw new Error(error.message);
+  }
+
+  const tallies = await fetchVoteTallies(version.lectureId);
+  const tally = tallies[versionId] || { upvotes: 0, downvotes: 0 };
+  return { versionId, ...tally, myVote: vote };
+}
+
+/** Which versions of a lecture has this user voted on? */
+async function getUserVotes(lectureId, email) {
+  if (!lectureId || !email) return {};
+
+  const votes = {};
+  try {
+    const { data, error } = await supabase
+      .from("transcript_version_votes")
+      .select("version_id, vote")
+      .eq("lecture_id", lectureId)
+      .eq("email", email);
+    if (error) {
+      console.warn("Supabase user vote lookup error:", error.message);
+      return votes;
+    }
+    for (const row of data || []) votes[row.version_id] = row.vote;
+  } catch (err) {
+    console.warn("User vote lookup failed:", err.message);
+  }
+  return votes;
+}
+
+/**
+ * Permanently delete one version. Admin-only — wrong-language and hallucinated
+ * transcripts are noise worth removing, but a normal user must never be able to
+ * destroy someone else's contribution.
+ */
+async function deleteTranscriptVersion(versionId) {
+  if (!versionId) return null;
+
+  await connectMongo();
+  const deleted = await TranscriptVersion.findOneAndDelete({ versionId }).lean();
+  if (!deleted) return null;
+
+  const { error: voteError } = await supabase
+    .from("transcript_version_votes")
+    .delete()
+    .eq("version_id", versionId);
+  if (voteError) console.warn("Supabase vote cleanup error:", voteError.message);
+
+  const { error } = await supabase
+    .from("transcript_versions")
+    .delete()
+    .eq("id", versionId);
+  if (error) console.warn("Supabase version delete error:", error.message);
+
+  return { versionId, lectureId: deleted.lectureId };
+}
+
+module.exports = {
+  getCachedTranscript,
+  saveTranscript,
+  buildLectureId,
+  buildVersionId,
+  listTranscriptVersions,
+  getTranscriptVersion,
+  recordVersionDownload,
+  voteOnVersion,
+  getUserVotes,
+  deleteTranscriptVersion,
+  rankVersions,
+};

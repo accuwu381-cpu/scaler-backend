@@ -395,7 +395,6 @@ const syncUser = async (req, res) => {
       role,
       country,
       cgr_score,
-      phone_number,
       avatar_file_name,
     } = req.body;
 
@@ -420,7 +419,6 @@ const syncUser = async (req, res) => {
           role,
           country,
           cgr_score,
-          phone_number,
           avatar_file_name,
           last_sync: new Date().toISOString(),
         },

@@ -316,13 +316,13 @@ const pingUser = async (req, res) => {
  * Increments the download counter (video | audio | transcript) for a user.
  * Public endpoint — called by the extension.
  *
- * Body: { email, type, lecture?, lectureSlug?, provider?, model?, source? }
+ * Body: { email, type, lecture?, lectureSlug?, provider?, model?, source?, versionId? }
  * provider/model/source are transcript-only and optional — extension builds
  * that predate them simply leave the columns NULL.
  */
 const trackDownload = async (req, res) => {
   try {
-    const { email, type, lecture, lectureSlug, provider, source } = req.body;
+    const { email, type, lecture, lectureSlug, provider, source, versionId } = req.body;
     // Accept `model` or the older `modelName` spelling from the extension.
     const model = req.body.model || req.body.modelName;
 
@@ -347,6 +347,10 @@ const trackDownload = async (req, res) => {
         // a bad `source` must never cost us the row or the counter bump.
         const src = clean(source);
         row.source = src === "cache" || src === "generated" ? src : null;
+        // Which transcript version was served. Logged for every transcript
+        // download; the version's own download_count is bumped separately and
+        // only on a deliberate pick from the versions page.
+        row.version_id = clean(versionId);
       }
 
       const { error: insertError } = await supabase

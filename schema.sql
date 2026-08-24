@@ -37,7 +37,8 @@ CREATE TABLE public.download_history (
   provider text,
   model text,
   source text,
-  CONSTRAINT download_history_transcript_only_meta CHECK (type = 'transcript' OR (provider IS NULL AND model IS NULL AND source IS NULL))
+  version_id text,
+  CONSTRAINT download_history_transcript_only_meta CHECK (type = 'transcript' OR (provider IS NULL AND model IS NULL AND source IS NULL AND version_id IS NULL))
 );
 CREATE TABLE public.messages (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -80,6 +81,31 @@ CREATE TABLE public.transcripts (
   provider text,
   model text,
   CONSTRAINT transcripts_pkey PRIMARY KEY (id)
+);
+-- One row per stored transcript version; the text itself lives in MongoDB.
+-- Lectures keep every version ever generated — see migrations/001.
+CREATE TABLE public.transcript_versions (
+  id text NOT NULL,
+  lecture_id text NOT NULL,
+  title text,
+  class_id text,
+  provider text,
+  model text,
+  generated_by text,
+  char_count integer,
+  download_count integer NOT NULL DEFAULT 0,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT transcript_versions_pkey PRIMARY KEY (id)
+);
+-- One vote per user per version. Tallies are aggregated on read rather than
+-- kept in counter columns, so concurrent votes cannot lose a race.
+CREATE TABLE public.transcript_version_votes (
+  version_id text NOT NULL,
+  lecture_id text NOT NULL,
+  email text NOT NULL,
+  vote text NOT NULL CHECK (vote IN ('up', 'down')),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT transcript_version_votes_pkey PRIMARY KEY (version_id, email)
 );
 CREATE TABLE public.summaries (
   lecture_id text NOT NULL,

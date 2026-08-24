@@ -2,7 +2,13 @@ const express = require("express");
 const {
   getTranscript,
   saveTranscriptHandler,
+  getVersions,
+  getVersion,
+  recordDownload,
+  voteVersion,
+  deleteVersion,
 } = require("../controllers/transcriptCache.controller");
+const { verifyToken } = require("../middlewares/auth.middleware");
 
 const router = express.Router();
 
@@ -18,6 +24,22 @@ function requireExtensionToken(req, res, next) {
 
 // GET /api/transcript?title=<lecture title>  — cache lookup (extension calls this first)
 router.get("/", requireExtensionToken, getTranscript);
+
+// GET /api/transcript/versions?slug=  — version metadata, no transcript text
+router.get("/versions", requireExtensionToken, getVersions);
+
+// GET /api/transcript/version/:versionId  — one version including its text
+router.get("/version/:versionId", requireExtensionToken, getVersion);
+
+// POST /api/transcript/version/:versionId/download  — count a deliberate download
+router.post("/version/:versionId/download", requireExtensionToken, recordDownload);
+
+// POST /api/transcript/version/:versionId/vote  — thumbs up / down / withdraw
+router.post("/version/:versionId/vote", requireExtensionToken, voteVersion);
+
+// DELETE /api/transcript/version/:versionId  — admin only (cookie JWT, not the
+// extension token) so a normal user can never destroy someone's contribution.
+router.delete("/version/:versionId", verifyToken, deleteVersion);
 
 // POST /api/transcript/save  — called by extension after generating a new transcript
 router.post("/save", requireExtensionToken, saveTranscriptHandler);
