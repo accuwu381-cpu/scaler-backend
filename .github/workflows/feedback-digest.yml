@@ -1,0 +1,91 @@
+name: Feedback digest
+
+# Nightly check of the feedback Google Sheet. Emails a digest when rows appeared
+# since the last run; silent otherwise.
+#
+# Repo setup needed once:
+#   Settings → Secrets and variables → Actions → New repository secret
+#     GMAIL_APP_PASSWORD = the Gmail app password for the from-address
+#   (optional variables, defaults live in scripts/feedbackDigest.js)
+#     FEEDBACK_MAIL_FROM, FEEDBACK_MAIL_TO, FEEDBACK_SHEET_ID, FEEDBACK_SHEET_GID
+#
+# The sheet must stay shared as "anyone with the link can view" — the script
+# reads its public CSV export, so no Google credentials are involved.
+
+on:
+  schedule:
+    # 21:30 UTC = 03:00 IST. GitHub queues cron jobs, so it can run late.
+    - cron: '30 21 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Email the latest rows even if nothing is new'
+        type: boolean
+        default: false
+      dry_run:
+        description: 'Only log what would be sent'
+        type: boolean
+        default: false
+
+# Only for committing the seen-rows state file back.
+permissions:
+  contents: write
+
+concurrency:
+  group: feedback-digest
+  cancel-in-progress: false
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Only nodemailer is needed — installing the full backend (mongoose,
+      # supabase, express) would add a minute per night for nothing.
+      - name: Install mailer
+        run: npm install nodemailer@^7 --no-save --no-audit --no-fund
+
+      - name: Check for new feedback
+        id: digest
+        env:
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          FEEDBACK_MAIL_FROM: ${{ vars.FEEDBACK_MAIL_FROM }}
+          FEEDBACK_MAIL_TO: ${{ vars.FEEDBACK_MAIL_TO }}
+          FEEDBACK_SHEET_ID: ${{ vars.FEEDBACK_SHEET_ID }}
+          FEEDBACK_SHEET_GID: ${{ vars.FEEDBACK_SHEET_GID }}
+        run: |
+          # Built as a variable rather than inlined: on the nightly cron the
+          # inputs are empty, and a bare `&&` expression would leave stray
+          # line continuations in the command.
+          ARGS=""
+          if [ "${{ inputs.force }}" = "true" ]; then ARGS="$ARGS --force"; fi
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          node scripts/feedbackDigest.js $ARGS
+
+      # The state file is how the next run knows what is already reported.
+      - name: Persist seen rows
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          # --porcelain also reports the file as untracked, which `git diff`
+          # alone would miss on the very first run.
+          if [ -z "$(git status --porcelain -- scripts/state/feedback-seen.json)" ]; then
+            echo "No state change."
+            exit 0
+          fi
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add scripts/state/feedback-seen.json
+          git commit -m "chore: record feedback rows seen by nightly digest [skip ci]"
+          git push
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "New responses this run: ${{ steps.digest.outputs.new_count || 'n/a' }}" >> "$GITHUB_STEP_SUMMARY"
