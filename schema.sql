@@ -116,3 +116,61 @@ CREATE TABLE public.summaries (
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT summaries_pkey PRIMARY KEY (lecture_id)
 );
+-- ── Crowdsourced classroom allocation (migrations/002, 003) ──────────────────
+-- One row per user per class: their CURRENT answer. Edits are unlimited while
+-- the vote window is open; superseded answers move to classroom_vote_history.
+CREATE TABLE public.classroom_votes (
+  class_id       text NOT NULL,
+  email          text NOT NULL,
+  room           text NOT NULL CHECK (room IN ('0C','1A','1B','2A','2B1','2B2','2C','online')),
+  batch          text,
+  subject        text,
+  lecture_title  text,
+  class_date     date NOT NULL,
+  weekday        smallint NOT NULL,
+  slot_start     text NOT NULL,
+  class_start    timestamptz NOT NULL,
+  class_end      timestamptz NOT NULL,
+  weight_at_vote numeric NOT NULL DEFAULT 0.5,
+  edits          smallint NOT NULL DEFAULT 0,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  updated_at     timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT classroom_votes_pkey PRIMARY KEY (class_id, email)
+);
+-- The room a finished class actually happened in. The only table the history
+-- prior and the voter accuracy scoring read.
+CREATE TABLE public.classroom_settled (
+  class_id   text NOT NULL,
+  batch      text,
+  subject    text,
+  weekday    smallint NOT NULL,
+  slot_start text NOT NULL,
+  class_date date NOT NULL,
+  room       text NOT NULL,
+  vote_count integer NOT NULL,
+  weight_sum numeric NOT NULL,
+  settled_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT classroom_settled_pkey PRIMARY KEY (class_id)
+);
+-- Earned vote weight, fully derivable from the two tables above.
+CREATE TABLE public.classroom_voter_stats (
+  email      text NOT NULL,
+  correct    integer NOT NULL DEFAULT 0,
+  incorrect  integer NOT NULL DEFAULT 0,
+  weight     numeric NOT NULL DEFAULT 0.5,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT classroom_voter_stats_pkey PRIMARY KEY (email)
+);
+-- Append-only audit trail of replaced answers.
+CREATE TABLE public.classroom_vote_history (
+  id             bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  class_id       text NOT NULL,
+  email          text NOT NULL,
+  room           text NOT NULL,
+  weight_at_vote numeric NOT NULL,
+  cast_at        timestamptz NOT NULL,
+  replaced_by    text NOT NULL,
+  replaced_at    timestamptz NOT NULL DEFAULT now(),
+  edit_number    smallint NOT NULL,
+  CONSTRAINT classroom_vote_history_pkey PRIMARY KEY (id)
+);

@@ -7,6 +7,7 @@ const summaryCacheRoutes = require("./routes/summaryCache.routes");
 const authRoutes = require("./routes/auth.routes");
 const messagesRoutes = require("./routes/messages.routes");
 const usersRoutes = require("./routes/users.routes");
+const classroomRoutes = require("./routes/classroom.routes");
 const { connectMongo } = require("./services/mongodb");
 
 // Connect to MongoDB immediately (cached — safe to call multiple times)
@@ -51,6 +52,7 @@ app.use("/api/transcript", transcriptCacheRoutes);
 app.use("/api/summary", summaryCacheRoutes);
 app.use("/api/messages", messagesRoutes);
 app.use("/api/users", usersRoutes);
+app.use("/api/classroom", classroomRoutes);
 app.use("/api/auth", authRoutes);
 
 // Health check
