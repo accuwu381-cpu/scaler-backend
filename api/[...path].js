@@ -5,6 +5,11 @@
 // hands the function the original request URL. That is the whole point of this
 // file.
 //
+// The filename must be the catch-all form `[...path].js`. The optional
+// catch-all `[[...path]].js` is a Next.js convention: Vercel Functions parse it
+// as a single dynamic segment named "[...path]", so /api/messages reached this
+// handler but /api/messages/active did not.
+//
 // The previous setup routed with a catch-all rewrite in vercel.json:
 //
 //   { "source": "/(.*)", "destination": "/server.js" }
