@@ -55,9 +55,14 @@ app.use("/api/users", usersRoutes);
 app.use("/api/classroom", classroomRoutes);
 app.use("/api/auth", authRoutes);
 
-// Health check
-app.get("/", (req, res) => {
-  res.json({ message: "Scaler++ Backend is running!" });
+// Health check.
+// Answers on every path the root can arrive as: "/" locally, and "/api" or
+// "/api/health" on Vercel, where the root rewrite may deliver either.
+app.get(["/", "/api", "/api/health"], (req, res) => {
+  res.json({
+    message: "Scaler++ Backend is running!",
+    routes: ["/api/transcribe", "/api/transcript", "/api/summary", "/api/messages", "/api/users", "/api/classroom"],
+  });
 });
 
 app.post("/message", (req, res) => {
