@@ -61,6 +61,11 @@ app.use("/api/auth", authRoutes);
 app.get(["/", "/api", "/api/health"], (req, res) => {
   res.json({
     message: "Scaler++ Backend is running!",
+    // Which build is actually serving. Vercel injects these; during the
+    // 2026-09-05 outage there was no way to tell a deployed fix from a stale
+    // one, and every diagnosis had to guess.
+    commit: (process.env.VERCEL_GIT_COMMIT_SHA || "local").slice(0, 7),
+    deployedAt: process.env.VERCEL_DEPLOYMENT_ID || "local",
     routes: ["/api/transcribe", "/api/transcript", "/api/summary", "/api/messages", "/api/users", "/api/classroom"],
   });
 });
