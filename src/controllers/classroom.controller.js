@@ -75,6 +75,9 @@ const postVote = async (req, res) => {
       email,
       room,
       meta: {
+        // The course batch ("SST DevOps & Cloud 2028 Batch A") is what predicts
+        // a room; `subject` is accepted as its legacy name.
+        courseBatch: req.body?.courseBatch,
         subject: req.body?.subject,
         batch: req.body?.batch,
         lectureTitle: req.body?.lectureTitle,

@@ -18,8 +18,15 @@ const HOUR_MS = 60 * MINUTE_MS;
 /** Every votable value. `online` is a real answer, not a placeholder. */
 const ROOMS = ["0C", "1A", "1B", "2A", "2B1", "2B2", "2C", "online"];
 
-/** Voting opens this far before a class starts and closes at its end. */
-const VOTE_WINDOW_MS = 24 * HOUR_MS;
+/**
+  * Voting opens this far before a class starts and closes at its end.
+  *
+  * A week, not a day: Scaler publishes the whole week's timetable at once, so
+  * one person who knows the rooms can enter them for every class in one sitting
+  * instead of the batch re-reporting each morning. Votes cast that far out are
+  * discounted by recencyFactor, not rejected.
+  */
+const VOTE_WINDOW_MS = 7 * 24 * HOUR_MS;
 
 // Thresholds are counts of people, not sums of weight. Weight still decides
 // which room leads when heads are tied, and a muted voter still counts as
@@ -73,10 +80,12 @@ function weightFor(stats) {
 /**
  * Discount for how far ahead of the class a vote was cast.
  *
- * A vote from someone in the corridor is better evidence than one from
- * yesterday evening — but yesterday evening still carries real information
- * (a notice board, a message in the batch group), so it is discounted, not
- * discarded.
+ * A vote from someone in the corridor is better evidence than one typed in from
+ * a published timetable days earlier — but the timetable still carries real
+ * information, so it is discounted, not discarded. Everything beyond six hours
+ * shares the same floor, a week out included: with count-based thresholds this
+ * factor only breaks ties between rooms, so splitting the floor further would
+ * add arithmetic without changing an outcome.
  *
  * @param {number} castMs      when the vote was cast
  * @param {number} classStartMs
@@ -116,17 +125,24 @@ function _mode(roomsNewestFirst) {
 /**
  * The history-based prediction, from the most specific tier that has evidence.
  *
- * Tiers, in order: the same course for this batch, then the same weekday+slot
- * for this batch, then anything this batch has done. The batch-wide tier is the
- * weakest claim about *this* class, so it is penalised.
+ * The unit that actually shares a room is the *course batch* — Scaler's
+ * `super_batch_name`, e.g. "SST DevOps & Cloud 2028 Batch A" — not the degree
+ * cohort, which can hold several course batches sitting in different rooms at
+ * the same hour. So the tiers narrow from that group and its timeslot outwards:
  *
- * @param {{subject?: Array, slot?: Array, batch?: Array}} tiers
+ *   courseSlot  same course batch, same weekday + time   ← what repeats
+ *   course      same course batch, any hour
+ *   slot        same cohort, same weekday + time         ← course unknown
+ *   batch       same cohort, anything                    ← weakest, penalised
+ *
+ * @param {{courseSlot?: Array, course?: Array, slot?: Array, batch?: Array}} tiers
  *        each an array of `{room}` rows ordered newest first
  * @returns {{room: string, weight: number, tier: string}|null}
  */
 function computePrior(tiers) {
   const order = [
-    ["subject", tiers?.subject, 0],
+    ["courseSlot", tiers?.courseSlot, 0],
+    ["course", tiers?.course, 0],
     ["slot", tiers?.slot, 0],
     ["batch", tiers?.batch, 0.5],
   ];

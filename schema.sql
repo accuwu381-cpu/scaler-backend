@@ -123,8 +123,8 @@ CREATE TABLE public.classroom_votes (
   class_id       text NOT NULL,
   email          text NOT NULL,
   room           text NOT NULL CHECK (room IN ('0C','1A','1B','2A','2B1','2B2','2C','online')),
-  batch          text,
-  subject        text,
+  batch          text,                       -- degree cohort, server-derived
+  subject        text,                       -- COURSE BATCH (super_batch_name), not a topic
   lecture_title  text,
   class_date     date NOT NULL,
   weekday        smallint NOT NULL,

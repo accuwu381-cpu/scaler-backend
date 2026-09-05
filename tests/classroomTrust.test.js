@@ -83,51 +83,72 @@ test("a vote cast a day early is worth 0.6", () => {
   assert.equal(recencyFactor(START - 24 * HOUR, START), 0.6);
 });
 
+test("a bulk entry a week ahead still counts, at the same floor", () => {
+  // Deliberately not a lower tier: a timetable typed in from the published
+  // schedule is real information, and with count-based thresholds this factor
+  // only ever breaks ties between rooms.
+  assert.equal(recencyFactor(START - 7 * 24 * HOUR, START), 0.6);
+});
+
 // ── computePrior ──────────────────────────────────────────────────────────────
 
 const rows = (...roomsNewestFirst) =>
   roomsNewestFirst.map((room, i) => ({ room, classDate: `2026-08-${20 - i}` }));
 
 test("no settled history anywhere yields no prior", () => {
-  assert.equal(computePrior({ subject: [], slot: [], batch: [] }), null);
+  assert.equal(computePrior({ courseSlot: [], course: [], slot: [], batch: [] }), null);
 });
 
-test("three identical subject sessions give a strong prior", () => {
-  assert.deepEqual(computePrior({ subject: rows("2B1", "2B1", "2B1") }), {
+test("the same course at the same hour is the strongest evidence there is", () => {
+  // "SST DevOps & Cloud 2028 Batch A, Thursdays at 2pm" — the group that
+  // actually shares a room, in the slot it shares it.
+  assert.deepEqual(computePrior({ courseSlot: rows("2B1", "2B1", "2B1") }), {
     room: "2B1",
     weight: 1.5,
-    tier: "subject",
+    tier: "courseSlot",
   });
 });
 
-test("two of three identical subject sessions give a weak prior", () => {
-  assert.deepEqual(computePrior({ subject: rows("2B1", "1A", "2B1") }), {
+test("two of three identical course-slot sessions give a weak prior", () => {
+  assert.deepEqual(computePrior({ courseSlot: rows("2B1", "1A", "2B1") }), {
     room: "2B1",
     weight: 1.0,
-    tier: "subject",
+    tier: "courseSlot",
   });
 });
 
-test("three different subject sessions fall through to the slot tier", () => {
+test("with no history for that hour, the course's other sessions are used", () => {
   const prior = computePrior({
-    subject: rows("0C", "1A", "2C"),
+    courseSlot: rows("0C"),
+    course: rows("2B1", "2B1", "2B1"),
+  });
+  assert.deepEqual(prior, { room: "2B1", weight: 1.5, tier: "course" });
+});
+
+test("an unknown course falls back to the cohort's habits for that hour", () => {
+  const prior = computePrior({
+    course: rows("0C", "1A", "2C"),
     slot: rows("2B1", "2B1", "2B1"),
   });
   assert.deepEqual(prior, { room: "2B1", weight: 1.5, tier: "slot" });
 });
 
-test("a single subject session is not enough and falls through", () => {
+test("the tiers are tried most specific first", () => {
+  // Every tier has evidence; the course-slot tier must win.
   const prior = computePrior({
-    subject: rows("0C"),
-    slot: rows("1B", "1B"),
+    courseSlot: rows("0C", "0C"),
+    course: rows("1A", "1A", "1A"),
+    slot: rows("2A", "2A", "2A"),
+    batch: rows("2C", "2C", "2C"),
   });
-  assert.deepEqual(prior, { room: "1B", weight: 1.0, tier: "slot" });
+  assert.equal(prior.tier, "courseSlot");
+  assert.equal(prior.room, "0C");
 });
 
 test("only the three most recent sessions in a tier are considered", () => {
   // Four rows: the oldest 2B2 must be ignored, leaving 1A twice out of three.
-  const prior = computePrior({ subject: rows("1A", "2C", "1A", "2B2") });
-  assert.deepEqual(prior, { room: "1A", weight: 1.0, tier: "subject" });
+  const prior = computePrior({ courseSlot: rows("1A", "2C", "1A", "2B2") });
+  assert.deepEqual(prior, { room: "1A", weight: 1.0, tier: "courseSlot" });
 });
 
 test("the batch-wide tier is penalised by half a point", () => {
@@ -147,10 +168,10 @@ test("a weak batch-wide prior is worth only half a point", () => {
 });
 
 test("a tie inside a tier is broken by the most recent session", () => {
-  const prior = computePrior({ subject: rows("1A", "2B1", "2B1", "1A") });
+  const prior = computePrior({ courseSlot: rows("1A", "2B1", "2B1", "1A") });
   // Newest-first 1A, 2B1, 2B1 -> 2B1 wins on count, not recency.
   assert.equal(prior.room, "2B1");
-  const tied = computePrior({ subject: rows("1A", "2B1") });
+  const tied = computePrior({ courseSlot: rows("1A", "2B1") });
   assert.equal(tied, null, "a 1-1 split is no evidence at all");
 });
 
@@ -380,12 +401,18 @@ test("the dissent line reports the strongest losing room only", () => {
 
 const END = START + 2 * HOUR;
 
-test("voting opens exactly 24 hours before the class starts", () => {
-  assert.equal(isVotingOpen(START - 24 * HOUR, START, END), true);
+test("voting opens a week before the class starts", () => {
+  // The whole week's timetable is published at once, so one person can enter
+  // every room for the week instead of everyone re-reporting each morning.
+  assert.equal(isVotingOpen(START - 7 * 24 * HOUR, START, END), true);
 });
 
-test("voting is closed a second before the 24 hour window", () => {
-  assert.equal(isVotingOpen(START - 24 * HOUR - 1000, START, END), false);
+test("voting is closed a second before the week-long window", () => {
+  assert.equal(isVotingOpen(START - 7 * 24 * HOUR - 1000, START, END), false);
+});
+
+test("a vote three days ahead is inside the window", () => {
+  assert.equal(isVotingOpen(START - 3 * 24 * HOUR, START, END), true);
 });
 
 test("voting is open while the class is running", () => {
@@ -397,14 +424,21 @@ test("voting closes when the class ends", () => {
   assert.equal(isVotingOpen(END + 1000, START, END), false);
 });
 
+test("a past class is closed to its own voters too", () => {
+  // The window is what makes an answer permanent: once the class is over
+  // nobody can revise what they said, including the people who said it.
+  const yesterday = START - 24 * HOUR;
+  assert.equal(isVotingOpen(Date.now(), yesterday, yesterday + 2 * HOUR), false);
+});
+
 test("the thresholds are one voter to establish, two to override", () => {
   assert.equal(ESTABLISH_VOTERS, 1);
   assert.equal(OVERRIDE_VOTERS, 2);
   assert.equal(SETTLE_VOTERS, 2);
 });
 
-test("the window constant is a day", () => {
-  assert.equal(VOTE_WINDOW_MS, 24 * HOUR);
+test("the window constant is a week", () => {
+  assert.equal(VOTE_WINDOW_MS, 7 * 24 * HOUR);
 });
 
 test("every room the schema allows is offered, online included", () => {

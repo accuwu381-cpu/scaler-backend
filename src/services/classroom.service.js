@@ -19,11 +19,8 @@ const {
   isVotingOpen,
 } = require("./classroomTrust");
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 /** history.replaced_by sentinel for a vote that was taken back, not changed. */
 const WITHDRAWN = "withdrawn";
-const DAILY_WRITE_CAP = 30;
 const PRIOR_TIER_LIMIT = 3;
 const SWEEP_LIMIT = 20;
 const SWEEP_SCAN = 200;
@@ -44,6 +41,26 @@ function weekdayFrom(startsAtMs) {
 
 function isKnownRoom(room) {
   return ROOMS.includes(room);
+}
+
+/**
+ * The course batch a class belongs to — Scaler's `super_batch_name`, e.g.
+ * "SST DevOps & Cloud 2028 Batch A". Stored in the `subject` column and used as
+ * the primary prediction key, because that is the group which actually shares a
+ * room; the `batch` column holds the wider degree cohort.
+ *
+ * `batch` is accepted as the last fallback on purpose: extension builds that
+ * predate the `courseBatch` field already send the same `super_batch_name`
+ * string under that name, so installs in the wild start populating course
+ * batches the moment this backend deploys, without waiting for a store update.
+ *
+ * It is client-supplied either way, but every tier that uses it is also scoped
+ * to the server-derived cohort, so a made-up value can only muddle the grouping
+ * of the sender's own cohort — the same blast radius their votes already have.
+ */
+function courseBatchFrom(meta) {
+  const raw = meta?.courseBatch || meta?.subject || meta?.batch || "";
+  return String(raw).trim().slice(0, 200) || null;
 }
 
 /**
@@ -119,12 +136,16 @@ function toBallot(row) {
 }
 
 /**
- * The three prior tiers for one class, newest-first, excluding the class itself.
+ * The prior tiers for one class, newest-first, excluding the class itself.
  *
- * `memo` deduplicates across the classes in one request. The batch-wide tier is
- * identical for every card on the dashboard, and two sessions of the same
- * course share their subject tier, so eight cards used to fire 24 queries where
- * 3-10 will do.
+ * `subject` holds the COURSE BATCH (Scaler's `super_batch_name`), which is the
+ * group that actually shares a room; `batch` is the wider degree cohort from
+ * `extension_users`. See computePrior for why the tiers narrow in that order.
+ *
+ * `memo` deduplicates across the classes in one request: the cohort-wide tier
+ * is identical for every card on the dashboard, and sessions of the same course
+ * share their course tier, so eight cards fire a handful of queries rather than
+ * four each.
  */
 async function fetchPriorTiers({ classId, batch, subject, weekday, slotStart, memo }) {
   if (!batch) return {};
@@ -144,7 +165,16 @@ async function fetchPriorTiers({ classId, batch, subject, weekday, slotStart, me
   const queries = [];
 
   if (subject) {
-    queries.push(["subject", `subject:${subject}`, () => base().eq("subject", subject)]);
+    queries.push([
+      "courseSlot",
+      `course:${subject}|slot:${weekday}:${slotStart}`,
+      () =>
+        base()
+          .eq("subject", subject)
+          .eq("weekday", weekday)
+          .eq("slot_start", slotStart),
+    ]);
+    queries.push(["course", `course:${subject}`, () => base().eq("subject", subject)]);
   }
   queries.push([
     "slot",
@@ -376,7 +406,7 @@ async function getClassroomStates(classes, viewerEmail) {
       const tiers = await fetchPriorTiers({
         classId,
         batch,
-        subject: (meta.subject || "").trim() || null,
+        subject: courseBatchFrom(meta),
         weekday: weekdayFrom(startsAtMs),
         slotStart: slotKeyFrom(startsAtMs),
         memo: priorMemo,
@@ -419,30 +449,17 @@ async function getClassroomStates(classes, viewerEmail) {
 
 // ── writes ───────────────────────────────────────────────────────────────────
 
-async function countTodaysWrites(email) {
-  const dayStart = new Date();
-  dayStart.setUTCHours(0, 0, 0, 0);
-  const iso = dayStart.toISOString();
-
-  // head + exact count: the rows themselves are never looked at, and a heavy
-  // voter would otherwise ship 30 rows over the wire on every single vote.
-  const { count, error } = await supabase
-    .from("classroom_votes")
-    .select("class_id", { count: "exact", head: true })
-    .eq("email", email)
-    .or(`created_at.gte.${iso},updated_at.gte.${iso}`);
-
-  if (error) throw new Error(error.message);
-  return count || 0;
-}
-
 /**
  * Record or change one student's vote.
  *
  * One row per (class_id, email) — the voter's current answer. Edits are
- * unlimited while the window is open, because changing your mind is usually
- * honest: rooms move, and a guess from a notice board deserves to be corrected
- * by the person who then saw the door.
+ * unlimited while the window is open, and uncapped: entering a whole published
+ * week and then correcting it is the intended workflow, so a write budget would
+ * refuse honest work to inconvenience an abuser who is already bounded by the
+ * two-voter threshold and named in the audit trail.
+ *
+ * A class that has ended is closed to everyone, including its own voters — the
+ * window check is what makes a past answer permanent.
  *
  * Every superseded answer is appended to classroom_vote_history rather than
  * overwritten away, so a flip-flopper swinging a label near class time leaves
@@ -486,9 +503,6 @@ async function castVote({ classId, email, room, meta }) {
   if (withdrawing) {
     // Nothing to take back is not an error — a double click must not 409.
     if (!existing) return { ok: true, unchanged: true };
-    if ((await countTodaysWrites(cleanEmail)) >= DAILY_WRITE_CAP) {
-      return { ok: false, reason: "daily_cap" };
-    }
     return withdrawVote(String(classId), cleanEmail, existing);
   }
 
@@ -496,12 +510,9 @@ async function castVote({ classId, email, room, meta }) {
     return { ok: true, unchanged: true };
   }
 
-  if ((await countTodaysWrites(cleanEmail)) >= DAILY_WRITE_CAP) {
-    return { ok: false, reason: "daily_cap" };
-  }
-
   const batch = await resolveBatch(cleanEmail, meta.batch);
   const weight = weightFor(await fetchVoterStats(cleanEmail));
+  const courseBatch = courseBatchFrom(meta);
   const nowIso = new Date().toISOString();
 
   const row = {
@@ -509,7 +520,7 @@ async function castVote({ classId, email, room, meta }) {
     email: cleanEmail,
     room,
     batch,
-    subject: (meta.subject || "").trim() || null,
+    subject: courseBatch,
     lecture_title: (meta.lectureTitle || "").trim() || null,
     class_date: meta.classDate,
     weekday: weekdayFrom(startsAtMs),
@@ -646,7 +657,6 @@ async function listVoteHistoryForAdmin({ classId, email }) {
 }
 
 module.exports = {
-  DAILY_WRITE_CAP,
   VOTE_WINDOW_MS,
   getClassroomStates,
   castVote,
