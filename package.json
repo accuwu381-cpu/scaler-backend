@@ -4,8 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node --test tests/*.test.js",
-    "feedback:digest": "node scripts/feedbackDigest.js"
+    "test": "node --test tests/*.test.js"
   },
   "keywords": [],
   "author": "",
