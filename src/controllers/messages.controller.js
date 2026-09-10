@@ -52,6 +52,8 @@ const WRITABLE_COLUMNS = [
 ];
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /**
  * Normalize one targeting array: trim, drop empties, optionally lowercase,
@@ -152,6 +154,39 @@ const getActiveMessages = async (req, res) => {
       .json({ success: true, count: matched.length, data: matched });
   } catch (error) {
     console.error("Error fetching active messages:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Internal Server Error" });
+  }
+};
+
+const incrementMessageClick = async (req, res) => {
+  try {
+    const messageId = String(req.params.id || "").trim();
+    if (!UUID_PATTERN.test(messageId)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid message id." });
+    }
+
+    const { data, error } = await supabase.rpc("increment_message_click", {
+      p_message_id: messageId,
+      p_table_name: table_name,
+    });
+
+    if (error) throw error;
+    if (data === null) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Message not found." });
+    }
+
+    return res.status(200).json({
+      success: true,
+      click_count: Number(data),
+    });
+  } catch (error) {
+    console.error("Error incrementing message click count:", error);
     return res
       .status(500)
       .json({ success: false, message: "Internal Server Error" });
@@ -443,6 +478,7 @@ const syncUser = async (req, res) => {
 
 module.exports = {
   getActiveMessages,
+  incrementMessageClick,
   getAllMessages,
   createMessage,
   updateMessage,

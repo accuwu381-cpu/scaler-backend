@@ -2,6 +2,7 @@ const express = require("express");
 const { verifyToken } = require("../middlewares/auth.middleware");
 const {
   getActiveMessages,
+  incrementMessageClick,
   getAllMessages,
   createMessage,
   updateMessage,
@@ -14,6 +15,7 @@ const router = express.Router();
 
 router.get("/active", getActiveMessages);
 router.post("/sync-user", syncUser);
+router.post("/:id/click", incrementMessageClick);
 
 // Apply security middleware to all other routes
 router.use(verifyToken);

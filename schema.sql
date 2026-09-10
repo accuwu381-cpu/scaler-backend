@@ -53,6 +53,7 @@ CREATE TABLE public.messages (
   target_emails ARRAY NOT NULL DEFAULT '{}'::text[],
   target_batches ARRAY NOT NULL DEFAULT '{}'::text[],
   target_domains ARRAY NOT NULL DEFAULT '{}'::text[],
+  click_count bigint NOT NULL DEFAULT 0,
   CONSTRAINT messages_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.test_messages (
@@ -68,6 +69,7 @@ CREATE TABLE public.test_messages (
   target_emails ARRAY NOT NULL DEFAULT '{}'::text[],
   target_batches ARRAY NOT NULL DEFAULT '{}'::text[],
   target_domains ARRAY NOT NULL DEFAULT '{}'::text[],
+  click_count bigint NOT NULL DEFAULT 0,
   CONSTRAINT test_messages_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.transcripts (
