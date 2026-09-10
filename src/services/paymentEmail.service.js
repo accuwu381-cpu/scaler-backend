@@ -11,8 +11,9 @@ const FRONTEND_URL = (
   "https://scalerfrontend.vercel.app"
 ).replace(/\/+$/, "");
 
+const DEFAULT_MAIL_USER = "hindustanigamerritesh@gmail.com";
 const MAIL_USER =
-  process.env.PAYMENTS_MAIL_USER || process.env.GMAIL_USER || ADMIN_EMAIL;
+  process.env.PAYMENTS_MAIL_USER || DEFAULT_MAIL_USER;
 
 const escapeHtml = (value) =>
   String(value || "")
@@ -40,7 +41,7 @@ const getReviewUrl = (paymentId) => {
 };
 
 const getTransporter = () => {
-  const pass = process.env.GMAIL_APP_PASSWORD;
+  const pass = (process.env.GMAIL_APP_PASSWORD || "").replace(/\s+/g, "");
   if (!pass) return null;
 
   return nodemailer.createTransport({
