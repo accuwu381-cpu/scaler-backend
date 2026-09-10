@@ -13,7 +13,9 @@ const FRONTEND_URL = (
 
 const DEFAULT_MAIL_USER = "hindustanigamerritesh@gmail.com";
 const MAIL_USER =
-  process.env.PAYMENTS_MAIL_USER || DEFAULT_MAIL_USER;
+  process.env.PAYMENTS_MAIL_USER ||
+  process.env.GMAIL_USER ||
+  DEFAULT_MAIL_USER;
 
 const escapeHtml = (value) =>
   String(value || "")
