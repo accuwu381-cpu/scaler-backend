@@ -181,6 +181,56 @@ const getPayments = async (req, res) => {
   }
 };
 
+const resendPaymentEmail = async (req, res) => {
+  if (!requirePaymentToken(req, res)) return;
+
+  try {
+    const id = String(req.params.id || "").trim();
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "Payment id is required.",
+      });
+    }
+
+    const { data: payment, error } = await supabase
+      .from(TABLE)
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!payment) {
+      return res.status(404).json({
+        success: false,
+        message: "Payment not found.",
+      });
+    }
+
+    const email = await sendPaymentReviewEmail(payment);
+    if (!email.sent) {
+      return res.status(503).json({
+        success: false,
+        message: "Payment email is not configured.",
+        code: email.reason || "not_configured",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Payment review email sent.",
+    });
+  } catch (error) {
+    console.error("Payment review email retry failed:", error.message);
+    return res.status(502).json({
+      success: false,
+      message: "Could not send payment review email.",
+      code: error.code || "send_failed",
+      responseCode: error.responseCode || null,
+    });
+  }
+};
+
 const updatePaymentStatus = async (req, res) => {
   if (!requirePaymentToken(req, res)) return;
 
@@ -255,5 +305,6 @@ module.exports = {
   createPayment,
   getPublicPayments,
   getPayments,
+  resendPaymentEmail,
   updatePaymentStatus,
 };
