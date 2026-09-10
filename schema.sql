@@ -116,6 +116,18 @@ CREATE TABLE public.summaries (
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT summaries_pkey PRIMARY KEY (lecture_id)
 );
+CREATE TABLE public.donation_payments (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  amount_rupees numeric(10, 2) NOT NULL CHECK (amount_rupees > 0),
+  supporter_name text,
+  message text,
+  is_anonymous boolean NOT NULL DEFAULT false,
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  upi_id text NOT NULL DEFAULT '7218548912@sbi',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  reviewed_at timestamptz,
+  CONSTRAINT donation_payments_pkey PRIMARY KEY (id)
+);
 -- ── Crowdsourced classroom allocation (migrations/002, 003) ──────────────────
 -- One row per user per class: their CURRENT answer. Edits are unlimited while
 -- the vote window is open; superseded answers move to classroom_vote_history.

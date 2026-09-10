@@ -8,6 +8,7 @@ const authRoutes = require("./routes/auth.routes");
 const messagesRoutes = require("./routes/messages.routes");
 const usersRoutes = require("./routes/users.routes");
 const classroomRoutes = require("./routes/classroom.routes");
+const paymentsRoutes = require("./routes/payments.routes");
 const { connectMongo } = require("./services/mongodb");
 
 // Connect to MongoDB immediately (cached — safe to call multiple times)
@@ -24,8 +25,14 @@ app.use(
       
       const allowedOrigins = [
         "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
         "https://scalerfrontend.vercel.app",
-      ];
+        process.env.FRONTEND_URL,
+        process.env.PAYMENTS_FRONTEND_URL,
+        process.env.NEXT_PUBLIC_SITE_URL,
+      ].filter(Boolean);
       
       const isAllowed = 
         allowedOrigins.includes(origin) ||
@@ -53,6 +60,7 @@ app.use("/api/summary", summaryCacheRoutes);
 app.use("/api/messages", messagesRoutes);
 app.use("/api/users", usersRoutes);
 app.use("/api/classroom", classroomRoutes);
+app.use("/api/payments", paymentsRoutes);
 app.use("/api/auth", authRoutes);
 
 // Health check.
@@ -66,7 +74,7 @@ app.get(["/", "/api", "/api/health"], (req, res) => {
     // one, and every diagnosis had to guess.
     commit: (process.env.VERCEL_GIT_COMMIT_SHA || "local").slice(0, 7),
     deployedAt: process.env.VERCEL_DEPLOYMENT_ID || "local",
-    routes: ["/api/transcribe", "/api/transcript", "/api/summary", "/api/messages", "/api/users", "/api/classroom"],
+    routes: ["/api/transcribe", "/api/transcript", "/api/summary", "/api/messages", "/api/users", "/api/classroom", "/api/payments"],
   });
 });
 
